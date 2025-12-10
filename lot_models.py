@@ -133,6 +133,8 @@ class StorageContract:
     extra_labor_minutes: float = 0.0
     labor_rate_per_hour: float = 0.0
     recovery_miles: float = 0.0
+    extra_labor_minutes: float = 0.0
+    labor_rate_per_hour: float = 0.0
     notes: List[str] = field(default_factory=list)
     attachments: List[str] = field(default_factory=list)
     payments: List[Payment] = field(default_factory=list)
@@ -162,6 +164,8 @@ class StorageContract:
             "extra_labor_minutes": self.extra_labor_minutes,
             "labor_rate_per_hour": self.labor_rate_per_hour,
             "recovery_miles": self.recovery_miles,
+            "extra_labor_minutes": self.extra_labor_minutes,
+            "labor_rate_per_hour": self.labor_rate_per_hour,
             "notes": self.notes,
             "attachments": self.attachments,
             "payments": [p.to_dict() for p in self.payments],
@@ -193,6 +197,8 @@ class StorageContract:
             extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
             labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
             recovery_miles=float(data.get("recovery_miles", 0.0) or 0.0),
+            extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
+            labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
             notes=list(data.get("notes", [])),
             attachments=list(data.get("attachments", [])),
             payments=[Payment.from_dict(p) for p in data.get("payments", [])],

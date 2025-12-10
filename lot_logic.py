@@ -100,6 +100,12 @@ DEFAULT_VEHICLE_FEES: Dict[str, Dict[str, float]] = {
         "certified_mail_fee_first": 8.5,
         "certified_mail_fee_second": 8.5,
     },
+    "Car": {"daily_rate": 35.0, "tow_fee": 150.0, "impound_fee": 75.0, "admin_fee": 25.0},
+    "Truck": {"daily_rate": 42.0, "tow_fee": 175.0, "impound_fee": 85.0, "admin_fee": 30.0},
+    "Motorcycle": {"daily_rate": 25.0, "tow_fee": 120.0, "impound_fee": 60.0, "admin_fee": 20.0},
+    "RV": {"daily_rate": 60.0, "tow_fee": 250.0, "impound_fee": 125.0, "admin_fee": 40.0},
+    "Boat": {"daily_rate": 55.0, "tow_fee": 225.0, "impound_fee": 120.0, "admin_fee": 40.0},
+    "Trailer": {"daily_rate": 28.0, "tow_fee": 130.0, "impound_fee": 65.0, "admin_fee": 22.0},
 }
 FEE_TEMPLATES: Dict[str, Dict[str, float]] = {}
 
@@ -146,6 +152,11 @@ def load_fee_templates(path: Path = FEE_TEMPLATE_PATH) -> Dict[str, Dict[str, fl
                     "certified_mail_fee_second": float(
                         v.get("certified_mail_fee_second", default.get("certified_mail_fee_second", 0.0))
                     ),
+                merged[k] = {
+                    "daily_rate": float(v.get("daily_rate", DEFAULT_VEHICLE_FEES.get(k, {}).get("daily_rate", 0.0))),
+                    "tow_fee": float(v.get("tow_fee", DEFAULT_VEHICLE_FEES.get(k, {}).get("tow_fee", 0.0))),
+                    "impound_fee": float(v.get("impound_fee", DEFAULT_VEHICLE_FEES.get(k, {}).get("impound_fee", 0.0))),
+                    "admin_fee": float(v.get("admin_fee", DEFAULT_VEHICLE_FEES.get(k, {}).get("admin_fee", 0.0))),
                 }
         return merged
     except Exception:
@@ -185,6 +196,8 @@ def build_contract(
     extra_labor_minutes: float,
     labor_rate_per_hour: float,
     recovery_miles: float,
+    extra_labor_minutes: float,
+    labor_rate_per_hour: float,
 ) -> StorageContract:
     contract = StorageContract(
         contract_id=storage_data.next_id,
@@ -207,6 +220,8 @@ def build_contract(
         lien_eligible_date=(parse_date(start_date) + timedelta(days=LIEN_NOTICE_DAYS + LIEN_BUFFER_DAYS)).strftime(
             DATE_FORMAT
         ),
+        extra_labor_minutes=extra_labor_minutes,
+        labor_rate_per_hour=labor_rate_per_hour,
     )
     contract.fees = [
         Fee("Storage", daily_rate, category="storage", is_default=True),
@@ -261,6 +276,9 @@ def calculate_charges(contract: StorageContract, as_of: datetime | None = None) 
         + contract.certified_mail_fee_second,
         2,
     )
+def calculate_charges(contract: StorageContract, as_of: datetime | None = None) -> Dict[str, float]:
+    days = storage_days(contract, as_of)
+    storage_charge = round(days * contract.daily_rate, 2)
     result = {
         "storage": storage_charge,
         "tow_impound": round(contract.tow_fee + contract.impound_fee, 2),
@@ -351,6 +369,7 @@ def add_notice(contract: StorageContract, notice_type: str, amount_due: float, n
 
 
 def format_contract_record(contract: StorageContract, as_of: datetime | None = None) -> str:
+def format_contract_summary(contract: StorageContract, as_of: datetime | None = None) -> str:
     as_of = as_of or datetime.today()
     charges = calculate_charges(contract, as_of)
     bal = balance(contract, as_of)
@@ -361,6 +380,10 @@ def format_contract_record(contract: StorageContract, as_of: datetime | None = N
         "-----------------------------------",
         f"Contract #: {contract.contract_id}",
         f"Contract Type: {contract.contract_type}",
+    lines = [
+        "Storage & Recovery Contract Summary",
+        "-----------------------------------",
+        f"Contract #: {contract.contract_id}",
         f"Customer: {contract.customer.name} | {contract.customer.phone}",
         f"Address: {contract.customer.address}",
         f"Vehicle: {contract.vehicle.vehicle_type} {contract.vehicle.make} {contract.vehicle.model} ({contract.vehicle.plate})",
@@ -381,6 +404,9 @@ def format_contract_record(contract: StorageContract, as_of: datetime | None = N
         f"  Second notice planned/sent: {second_notice}",
         f"  Earliest lien sale: {lien_dates['earliest_lien']}",
         f"  Lien eligibility date: {lien_eligible} ({lien_status})",
+        f"  First notice: {lien_dates['first_notice']}",
+        f"  Second notice: {lien_dates['second_notice']}",
+        f"  Earliest lien sale: {lien_dates['earliest_lien']}",
         "",
         "Notices:",
     ]

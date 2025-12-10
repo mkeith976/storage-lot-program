@@ -14,6 +14,11 @@ from lot_logic import (
     default_fee_schedule,
     format_contract_record,
     lien_eligibility,
+    balance,
+    build_contract,
+    default_fee_schedule,
+    format_contract_summary,
+    add_notice,
     lien_timeline,
     load_data,
     load_fee_templates,
@@ -22,6 +27,9 @@ from lot_logic import (
     save_data,
     save_fee_templates,
     storage_days,
+    storage_days,
+    save_data,
+    save_fee_templates,
 )
 from lot_models import Customer, Vehicle, StorageContract, StorageData, DATE_FORMAT
 
@@ -61,6 +69,7 @@ class LotApp(tk.Tk):
         self.contract_tree = ttk.Treeview(
             container,
             columns=("id", "customer", "vehicle", "type", "start", "balance", "status"),
+            columns=("id", "customer", "vehicle", "start", "balance", "status"),
             show="headings",
             height=12,
         )
@@ -69,6 +78,8 @@ class LotApp(tk.Tk):
             ("customer", "Customer", 180),
             ("vehicle", "Vehicle", 180),
             ("type", "Contract Type", 130),
+            ("customer", "Customer", 200),
+            ("vehicle", "Vehicle", 200),
             ("start", "Start", 90),
             ("balance", "Balance", 90),
             ("status", "Status", 80),
@@ -85,6 +96,7 @@ class LotApp(tk.Tk):
         ttk.Button(btn_frame, text="Add Note", command=self._add_note_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="Generate Notice", command=self._add_notice_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="Print Record", command=self._print_record).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_frame, text="Export Summary", command=self._export_summary).pack(side=tk.RIGHT, padx=4)
 
         detail = ttk.LabelFrame(container, text="Contract Details")
         detail.pack(fill=tk.BOTH, expand=True)
@@ -103,6 +115,9 @@ class LotApp(tk.Tk):
         ttk.Label(timeline_frame, textvariable=self.second_notice_var).pack(side=tk.LEFT, padx=4)
         ttk.Label(timeline_frame, textvariable=self.lien_var).pack(side=tk.LEFT, padx=4)
         ttk.Label(timeline_frame, textvariable=self.lien_status_var, foreground="blue").pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.first_notice_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.second_notice_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.lien_var).pack(side=tk.LEFT, padx=4)
 
     def refresh_contracts(self) -> None:
         for row in self.contract_tree.get_children():
@@ -147,6 +162,7 @@ class LotApp(tk.Tk):
             return
 
         summary = format_contract_record(contract)
+        summary = format_contract_summary(contract)
         self.summary_text.insert("1.0", summary)
         self.summary_text.configure(state="disabled")
 
@@ -157,6 +173,8 @@ class LotApp(tk.Tk):
         first_notice, second_notice, lien_eligible, lien_status = lien_eligibility(contract)
         self.first_notice_var.set(f"1st Notice: {first_notice}")
         self.second_notice_var.set(f"2nd Notice: {second_notice}")
+        self.first_notice_var.set(f"1st Notice: {timeline['first_notice']}")
+        self.second_notice_var.set(f"2nd Notice: {timeline['second_notice']}")
         suffix = f"{total_days} days since intake"
         if past_due:
             suffix += f" | {days_past_due} days past due"
@@ -219,6 +237,17 @@ class LotApp(tk.Tk):
         summary = format_contract_record(contract)
         win = tk.Toplevel(self)
         win.title(f"Contract {contract.contract_id} Print Record")
+        save_data(self.storage_data)
+        self._show_selected_contract()
+
+    def _export_summary(self) -> None:
+        contract = self._get_selected_contract()
+        if not contract:
+            messagebox.showwarning("Export", "Select a contract first.")
+            return
+        summary = format_contract_summary(contract)
+        win = tk.Toplevel(self)
+        win.title(f"Contract {contract.contract_id} Summary")
         txt = tk.Text(win, wrap="word")
         txt.pack(fill=tk.BOTH, expand=True)
         txt.insert("1.0", summary)
@@ -230,6 +259,7 @@ class LotApp(tk.Tk):
             return
         Path(path).write_text(content, encoding="utf-8")
         messagebox.showinfo("Print Record", f"Saved to {path}")
+        messagebox.showinfo("Export", f"Saved to {path}")
 
     # ------------------------------------------------------------------
     # Intake tab
@@ -323,6 +353,8 @@ class LotApp(tk.Tk):
         ttk.Button(frame, text="Create Contract", command=self._create_contract).pack(pady=8)
         self._load_defaults_for_type()
 
+        ttk.Button(frame, text="Create Contract", command=self._create_contract).pack(pady=8)
+
     def _load_defaults_for_type(self) -> None:
         schedule = self.fee_templates.get(self.vehicle_type.get(), default_fee_schedule("Car"))
         self.daily_rate.set(f"{schedule['daily_rate']}")
@@ -395,6 +427,8 @@ class LotApp(tk.Tk):
             labor_minutes,
             labor_rate,
             recovery_miles,
+            labor_minutes,
+            labor_rate,
         )
         save_data(self.storage_data)
         messagebox.showinfo("Intake", f"Created contract #{contract.contract_id}")
@@ -420,6 +454,8 @@ class LotApp(tk.Tk):
         self.start_date.set(datetime.today().strftime(DATE_FORMAT))
         self._load_defaults_for_type()
 
+        self.notebook.select(self.contract_tab)
+
     def _add_labeled_entry(self, parent: tk.Widget, label: str, var: tk.StringVar, width: int = 25) -> None:
         row = ttk.Frame(parent)
         row.pack(fill=tk.X, pady=2)
@@ -436,6 +472,7 @@ class LotApp(tk.Tk):
         self.fee_tree = ttk.Treeview(
             frame,
             columns=("type", "daily", "tow", "impound", "admin", "tow_base", "mileage_rate", "labor_rate"),
+            columns=("type", "daily", "tow", "impound", "admin"),
             show="headings",
             height=8,
         )
