@@ -120,10 +120,19 @@ class StorageContract:
     customer: Customer
     vehicle: Vehicle
     start_date: str
+    contract_type: str = "Storage Only"
     daily_rate: float
     tow_fee: float = 0.0
     impound_fee: float = 0.0
     admin_fee: float = 0.0
+    tow_base_fee: float = 0.0
+    mileage_included: float = 0.0
+    mileage_rate: float = 0.0
+    certified_mail_fee_first: float = 0.0
+    certified_mail_fee_second: float = 0.0
+    extra_labor_minutes: float = 0.0
+    labor_rate_per_hour: float = 0.0
+    recovery_miles: float = 0.0
     extra_labor_minutes: float = 0.0
     labor_rate_per_hour: float = 0.0
     notes: List[str] = field(default_factory=list)
@@ -132,6 +141,9 @@ class StorageContract:
     fees: List[Fee] = field(default_factory=list)
     notices: List[Notice] = field(default_factory=list)
     status: str = "Active"
+    first_notice_sent_date: str = ""
+    second_notice_sent_date: str = ""
+    lien_eligible_date: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -139,10 +151,19 @@ class StorageContract:
             "customer": self.customer.to_dict(),
             "vehicle": self.vehicle.to_dict(),
             "start_date": self.start_date,
+            "contract_type": self.contract_type,
             "daily_rate": self.daily_rate,
             "tow_fee": self.tow_fee,
             "impound_fee": self.impound_fee,
             "admin_fee": self.admin_fee,
+            "tow_base_fee": self.tow_base_fee,
+            "mileage_included": self.mileage_included,
+            "mileage_rate": self.mileage_rate,
+            "certified_mail_fee_first": self.certified_mail_fee_first,
+            "certified_mail_fee_second": self.certified_mail_fee_second,
+            "extra_labor_minutes": self.extra_labor_minutes,
+            "labor_rate_per_hour": self.labor_rate_per_hour,
+            "recovery_miles": self.recovery_miles,
             "extra_labor_minutes": self.extra_labor_minutes,
             "labor_rate_per_hour": self.labor_rate_per_hour,
             "notes": self.notes,
@@ -151,6 +172,9 @@ class StorageContract:
             "fees": [f.to_dict() for f in self.fees],
             "notices": [n.to_dict() for n in self.notices],
             "status": self.status,
+            "first_notice_sent_date": self.first_notice_sent_date,
+            "second_notice_sent_date": self.second_notice_sent_date,
+            "lien_eligible_date": self.lien_eligible_date,
         }
 
     @staticmethod
@@ -160,10 +184,19 @@ class StorageContract:
             customer=Customer.from_dict(data.get("customer", {})),
             vehicle=Vehicle.from_dict(data.get("vehicle", {})),
             start_date=data.get("start_date", datetime.today().strftime(DATE_FORMAT)),
+            contract_type=data.get("contract_type", "Storage Only"),
             daily_rate=float(data.get("daily_rate", 0.0) or 0.0),
             tow_fee=float(data.get("tow_fee", 0.0) or 0.0),
             impound_fee=float(data.get("impound_fee", 0.0) or 0.0),
             admin_fee=float(data.get("admin_fee", 0.0) or 0.0),
+            tow_base_fee=float(data.get("tow_base_fee", 0.0) or 0.0),
+            mileage_included=float(data.get("mileage_included", 0.0) or 0.0),
+            mileage_rate=float(data.get("mileage_rate", 0.0) or 0.0),
+            certified_mail_fee_first=float(data.get("certified_mail_fee_first", 0.0) or 0.0),
+            certified_mail_fee_second=float(data.get("certified_mail_fee_second", 0.0) or 0.0),
+            extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
+            labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
+            recovery_miles=float(data.get("recovery_miles", 0.0) or 0.0),
             extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
             labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
             notes=list(data.get("notes", [])),
@@ -172,6 +205,9 @@ class StorageContract:
             fees=[Fee.from_dict(f) for f in data.get("fees", [])],
             notices=[Notice.from_dict(n) for n in data.get("notices", [])],
             status=data.get("status", "Active"),
+            first_notice_sent_date=data.get("first_notice_sent_date", ""),
+            second_notice_sent_date=data.get("second_notice_sent_date", ""),
+            lien_eligible_date=data.get("lien_eligible_date", ""),
         )
 
 

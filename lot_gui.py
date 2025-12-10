@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from lot_logic import (
+    add_notice,
+    balance,
+    build_contract,
+    default_fee_schedule,
+    format_contract_record,
+    lien_eligibility,
     balance,
     build_contract,
     default_fee_schedule,
@@ -18,6 +24,9 @@ from lot_logic import (
     load_fee_templates,
     past_due_status,
     record_payment,
+    save_data,
+    save_fee_templates,
+    storage_days,
     storage_days,
     save_data,
     save_fee_templates,
@@ -59,12 +68,16 @@ class LotApp(tk.Tk):
 
         self.contract_tree = ttk.Treeview(
             container,
+            columns=("id", "customer", "vehicle", "type", "start", "balance", "status"),
             columns=("id", "customer", "vehicle", "start", "balance", "status"),
             show="headings",
             height=12,
         )
         for col, text, width in [
             ("id", "ID", 50),
+            ("customer", "Customer", 180),
+            ("vehicle", "Vehicle", 180),
+            ("type", "Contract Type", 130),
             ("customer", "Customer", 200),
             ("vehicle", "Vehicle", 200),
             ("start", "Start", 90),
@@ -82,6 +95,7 @@ class LotApp(tk.Tk):
         ttk.Button(btn_frame, text="Record Payment", command=self._record_payment_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="Add Note", command=self._add_note_dialog).pack(side=tk.LEFT, padx=4)
         ttk.Button(btn_frame, text="Generate Notice", command=self._add_notice_dialog).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btn_frame, text="Print Record", command=self._print_record).pack(side=tk.RIGHT, padx=4)
         ttk.Button(btn_frame, text="Export Summary", command=self._export_summary).pack(side=tk.RIGHT, padx=4)
 
         detail = ttk.LabelFrame(container, text="Contract Details")
@@ -96,6 +110,11 @@ class LotApp(tk.Tk):
         self.first_notice_var = tk.StringVar()
         self.second_notice_var = tk.StringVar()
         self.lien_var = tk.StringVar()
+        self.lien_status_var = tk.StringVar()
+        ttk.Label(timeline_frame, textvariable=self.first_notice_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.second_notice_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.lien_var).pack(side=tk.LEFT, padx=4)
+        ttk.Label(timeline_frame, textvariable=self.lien_status_var, foreground="blue").pack(side=tk.LEFT, padx=4)
         ttk.Label(timeline_frame, textvariable=self.first_notice_var).pack(side=tk.LEFT, padx=4)
         ttk.Label(timeline_frame, textvariable=self.second_notice_var).pack(side=tk.LEFT, padx=4)
         ttk.Label(timeline_frame, textvariable=self.lien_var).pack(side=tk.LEFT, padx=4)
@@ -115,6 +134,7 @@ class LotApp(tk.Tk):
                     contract.contract_id,
                     contract.customer.name,
                     vehicle,
+                    contract.contract_type,
                     contract.start_date,
                     f"${bal:.2f}",
                     contract.status,
@@ -141,6 +161,7 @@ class LotApp(tk.Tk):
             self.summary_text.configure(state="disabled")
             return
 
+        summary = format_contract_record(contract)
         summary = format_contract_summary(contract)
         self.summary_text.insert("1.0", summary)
         self.summary_text.configure(state="disabled")
@@ -149,12 +170,16 @@ class LotApp(tk.Tk):
         past_due, days_past_due = past_due_status(contract)
         total_days = storage_days(contract)
         status_text = "Past due" if past_due else "Current"
+        first_notice, second_notice, lien_eligible, lien_status = lien_eligibility(contract)
+        self.first_notice_var.set(f"1st Notice: {first_notice}")
+        self.second_notice_var.set(f"2nd Notice: {second_notice}")
         self.first_notice_var.set(f"1st Notice: {timeline['first_notice']}")
         self.second_notice_var.set(f"2nd Notice: {timeline['second_notice']}")
         suffix = f"{total_days} days since intake"
         if past_due:
             suffix += f" | {days_past_due} days past due"
         self.lien_var.set(f"Earliest lien: {timeline['earliest_lien']} | {status_text} ({suffix})")
+        self.lien_status_var.set(f"Lien status: {lien_status} (eligible {lien_eligible})")
 
     def _record_payment_dialog(self) -> None:
         contract = self._get_selected_contract()
@@ -195,6 +220,23 @@ class LotApp(tk.Tk):
         amount_due = balance(contract)
         notice_type = simpledialog.askstring("Notice", "Notice type (1st/2nd/lien)", initialvalue="1st") or "1st"
         add_notice(contract, notice_type, amount_due)
+        today = datetime.today().strftime(DATE_FORMAT)
+        lower_type = notice_type.lower()
+        if "1" in lower_type or "first" in lower_type:
+            contract.first_notice_sent_date = today
+        elif "2" in lower_type or "second" in lower_type:
+            contract.second_notice_sent_date = today
+        save_data(self.storage_data)
+        self._show_selected_contract()
+
+    def _print_record(self) -> None:
+        contract = self._get_selected_contract()
+        if not contract:
+            messagebox.showwarning("Print Record", "Select a contract first.")
+            return
+        summary = format_contract_record(contract)
+        win = tk.Toplevel(self)
+        win.title(f"Contract {contract.contract_id} Print Record")
         save_data(self.storage_data)
         self._show_selected_contract()
 
@@ -216,6 +258,7 @@ class LotApp(tk.Tk):
         if not path:
             return
         Path(path).write_text(content, encoding="utf-8")
+        messagebox.showinfo("Print Record", f"Saved to {path}")
         messagebox.showinfo("Export", f"Saved to {path}")
 
     # ------------------------------------------------------------------
@@ -224,6 +267,18 @@ class LotApp(tk.Tk):
     def _build_intake_tab(self) -> None:
         frame = ttk.Frame(self.intake_tab, padding=12)
         frame.pack(fill=tk.BOTH, expand=True)
+
+        contract_type_frame = ttk.Frame(frame)
+        contract_type_frame.pack(fill=tk.X, pady=4)
+        ttk.Label(contract_type_frame, text="Contract Type", width=20).pack(side=tk.LEFT)
+        self.contract_type = tk.StringVar(value="Storage Only")
+        ttk.Combobox(
+            contract_type_frame,
+            textvariable=self.contract_type,
+            values=["Storage Only", "Tow & Recovery"],
+            state="readonly",
+        ).pack(side=tk.LEFT, padx=4)
+        self.contract_type.trace_add("write", lambda *_: self._load_defaults_for_type())
 
         # Customer
         cust = ttk.LabelFrame(frame, text="Customer")
@@ -245,6 +300,7 @@ class LotApp(tk.Tk):
         self.model = tk.StringVar()
         self.color = tk.StringVar()
         self.initial_mileage = tk.StringVar(value="0")
+        self.recovery_miles = tk.StringVar(value="0")
         self.extra_labor = tk.StringVar(value="0")
         self.labor_rate = tk.StringVar(value="45")
 
@@ -262,6 +318,8 @@ class LotApp(tk.Tk):
         type_box.bind("<<ComboboxSelected>>", lambda *_: self._load_defaults_for_type())
         ttk.Label(row, text="Initial Mileage").pack(side=tk.LEFT, padx=4)
         ttk.Entry(row, textvariable=self.initial_mileage, width=10).pack(side=tk.LEFT)
+        ttk.Label(row, text="Tow Miles", width=12).pack(side=tk.LEFT, padx=4)
+        ttk.Entry(row, textvariable=self.recovery_miles, width=10).pack(side=tk.LEFT)
         ttk.Label(row, text="Extra Labor Minutes").pack(side=tk.LEFT, padx=4)
         ttk.Entry(row, textvariable=self.extra_labor, width=10).pack(side=tk.LEFT)
         ttk.Label(row, text="Labor Rate/hr").pack(side=tk.LEFT, padx=4)
@@ -275,12 +333,25 @@ class LotApp(tk.Tk):
         self.impound_fee = tk.StringVar(value="75")
         self.admin_fee = tk.StringVar(value="25")
         self.start_date = tk.StringVar(value=datetime.today().strftime(DATE_FORMAT))
+        self.tow_base_fee = tk.StringVar(value="0")
+        self.mileage_included = tk.StringVar(value="0")
+        self.mileage_rate = tk.StringVar(value="0")
+        self.certified_mail_first = tk.StringVar(value="0")
+        self.certified_mail_second = tk.StringVar(value="0")
 
         self._add_labeled_entry(contract_frame, "Start Date (YYYY-MM-DD)", self.start_date)
         self._add_labeled_entry(contract_frame, "Daily Storage Rate", self.daily_rate)
         self._add_labeled_entry(contract_frame, "Tow Fee", self.tow_fee)
         self._add_labeled_entry(contract_frame, "Impound Fee", self.impound_fee)
         self._add_labeled_entry(contract_frame, "Admin Fee", self.admin_fee)
+        self._add_labeled_entry(contract_frame, "Tow Base Fee", self.tow_base_fee)
+        self._add_labeled_entry(contract_frame, "Mileage Included", self.mileage_included)
+        self._add_labeled_entry(contract_frame, "Mileage Rate", self.mileage_rate)
+        self._add_labeled_entry(contract_frame, "Certified Mail (1st)", self.certified_mail_first)
+        self._add_labeled_entry(contract_frame, "Certified Mail (2nd)", self.certified_mail_second)
+
+        ttk.Button(frame, text="Create Contract", command=self._create_contract).pack(pady=8)
+        self._load_defaults_for_type()
 
         ttk.Button(frame, text="Create Contract", command=self._create_contract).pack(pady=8)
 
@@ -290,6 +361,19 @@ class LotApp(tk.Tk):
         self.tow_fee.set(f"{schedule['tow_fee']}")
         self.impound_fee.set(f"{schedule['impound_fee']}")
         self.admin_fee.set(f"{schedule['admin_fee']}")
+        if self.contract_type.get() == "Storage Only":
+            self.tow_base_fee.set("0")
+            self.mileage_included.set("0")
+            self.mileage_rate.set("0")
+            self.certified_mail_first.set("0")
+            self.certified_mail_second.set("0")
+        else:
+            self.tow_base_fee.set(f"{schedule.get('tow_base_fee', 0.0)}")
+            self.mileage_included.set(f"{schedule.get('mileage_included', 0.0)}")
+            self.mileage_rate.set(f"{schedule.get('mileage_rate', 0.0)}")
+            self.certified_mail_first.set(f"{schedule.get('certified_mail_fee_first', 0.0)}")
+            self.certified_mail_second.set(f"{schedule.get('certified_mail_fee_second', 0.0)}")
+        self.labor_rate.set(f"{schedule.get('labor_rate', self.labor_rate.get())}")
 
     def _create_contract(self) -> None:
         try:
@@ -300,6 +384,12 @@ class LotApp(tk.Tk):
             labor_minutes = float(self.extra_labor.get())
             labor_rate = float(self.labor_rate.get())
             mileage = float(self.initial_mileage.get())
+            recovery_miles = float(self.recovery_miles.get())
+            tow_base = float(self.tow_base_fee.get())
+            miles_included = float(self.mileage_included.get())
+            mileage_rate = float(self.mileage_rate.get())
+            certified_first = float(self.certified_mail_first.get())
+            certified_second = float(self.certified_mail_second.get())
         except ValueError:
             messagebox.showerror("Intake", "Please check numeric fields.")
             return
@@ -324,16 +414,46 @@ class LotApp(tk.Tk):
             customer,
             vehicle,
             self.start_date.get(),
+            self.contract_type.get(),
             daily_rate,
             tow_fee,
             impound_fee,
             admin_fee,
+            tow_base,
+            miles_included,
+            mileage_rate,
+            certified_first,
+            certified_second,
+            labor_minutes,
+            labor_rate,
+            recovery_miles,
             labor_minutes,
             labor_rate,
         )
         save_data(self.storage_data)
         messagebox.showinfo("Intake", f"Created contract #{contract.contract_id}")
         self.refresh_contracts()
+        self._reset_intake_form()
+        self.notebook.select(self.contract_tab)
+
+    def _reset_intake_form(self) -> None:
+        self.contract_type.set("Storage Only")
+        self.cust_name.set("")
+        self.cust_phone.set("")
+        self.cust_address.set("")
+        self.plate.set("")
+        self.vin.set("")
+        self.vehicle_type.set("Car")
+        self.make.set("")
+        self.model.set("")
+        self.color.set("")
+        self.initial_mileage.set("0")
+        self.recovery_miles.set("0")
+        self.extra_labor.set("0")
+        self.labor_rate.set("45")
+        self.start_date.set(datetime.today().strftime(DATE_FORMAT))
+        self._load_defaults_for_type()
+
         self.notebook.select(self.contract_tab)
 
     def _add_labeled_entry(self, parent: tk.Widget, label: str, var: tk.StringVar, width: int = 25) -> None:
@@ -351,6 +471,7 @@ class LotApp(tk.Tk):
 
         self.fee_tree = ttk.Treeview(
             frame,
+            columns=("type", "daily", "tow", "impound", "admin", "tow_base", "mileage_rate", "labor_rate"),
             columns=("type", "daily", "tow", "impound", "admin"),
             show="headings",
             height=8,
@@ -361,6 +482,9 @@ class LotApp(tk.Tk):
             ("tow", "Tow Fee", 100),
             ("impound", "Impound", 100),
             ("admin", "Admin", 100),
+            ("tow_base", "Tow Base", 100),
+            ("mileage_rate", "Mileage Rate", 110),
+            ("labor_rate", "Labor/hr", 90),
         ]:
             self.fee_tree.heading(col, text=text)
             self.fee_tree.column(col, width=width)
@@ -374,12 +498,24 @@ class LotApp(tk.Tk):
         self.fee_tow = tk.StringVar()
         self.fee_impound = tk.StringVar()
         self.fee_admin = tk.StringVar()
+        self.fee_tow_base = tk.StringVar()
+        self.fee_mileage_included = tk.StringVar()
+        self.fee_mileage_rate = tk.StringVar()
+        self.fee_labor_rate = tk.StringVar()
+        self.fee_cert_first = tk.StringVar()
+        self.fee_cert_second = tk.StringVar()
 
         self._add_labeled_entry(form, "Vehicle Type", self.fee_type)
         self._add_labeled_entry(form, "Daily Storage", self.fee_daily)
         self._add_labeled_entry(form, "Tow Fee", self.fee_tow)
         self._add_labeled_entry(form, "Impound Fee", self.fee_impound)
         self._add_labeled_entry(form, "Admin Fee", self.fee_admin)
+        self._add_labeled_entry(form, "Tow Base", self.fee_tow_base)
+        self._add_labeled_entry(form, "Mileage Included", self.fee_mileage_included)
+        self._add_labeled_entry(form, "Mileage Rate", self.fee_mileage_rate)
+        self._add_labeled_entry(form, "Labor Rate", self.fee_labor_rate)
+        self._add_labeled_entry(form, "Cert Mail (1st)", self.fee_cert_first)
+        self._add_labeled_entry(form, "Cert Mail (2nd)", self.fee_cert_second)
 
         btns = ttk.Frame(frame)
         btns.pack(fill=tk.X, pady=4)
@@ -402,6 +538,9 @@ class LotApp(tk.Tk):
                     f"${fees['tow_fee']:.2f}",
                     f"${fees['impound_fee']:.2f}",
                     f"${fees['admin_fee']:.2f}",
+                    f"${fees.get('tow_base_fee', 0.0):.2f}",
+                    f"${fees.get('mileage_rate', 0.0):.2f}",
+                    f"${fees.get('labor_rate', 0.0):.2f}",
                 ),
             )
 
@@ -416,6 +555,12 @@ class LotApp(tk.Tk):
         self.fee_tow.set(str(fees["tow_fee"]))
         self.fee_impound.set(str(fees["impound_fee"]))
         self.fee_admin.set(str(fees["admin_fee"]))
+        self.fee_tow_base.set(str(fees.get("tow_base_fee", 0.0)))
+        self.fee_mileage_included.set(str(fees.get("mileage_included", 0.0)))
+        self.fee_mileage_rate.set(str(fees.get("mileage_rate", 0.0)))
+        self.fee_labor_rate.set(str(fees.get("labor_rate", 0.0)))
+        self.fee_cert_first.set(str(fees.get("certified_mail_fee_first", 0.0)))
+        self.fee_cert_second.set(str(fees.get("certified_mail_fee_second", 0.0)))
 
     def _save_fee_template(self) -> None:
         try:
@@ -423,6 +568,12 @@ class LotApp(tk.Tk):
             tow = float(self.fee_tow.get())
             impound = float(self.fee_impound.get())
             admin = float(self.fee_admin.get())
+            tow_base = float(self.fee_tow_base.get())
+            miles_included = float(self.fee_mileage_included.get())
+            mileage_rate = float(self.fee_mileage_rate.get())
+            labor_rate = float(self.fee_labor_rate.get())
+            cert_first = float(self.fee_cert_first.get())
+            cert_second = float(self.fee_cert_second.get())
         except ValueError:
             messagebox.showerror("Fees", "Please enter numeric values")
             return
@@ -432,6 +583,12 @@ class LotApp(tk.Tk):
             "tow_fee": tow,
             "impound_fee": impound,
             "admin_fee": admin,
+            "tow_base_fee": tow_base,
+            "mileage_included": miles_included,
+            "mileage_rate": mileage_rate,
+            "labor_rate": labor_rate,
+            "certified_mail_fee_first": cert_first,
+            "certified_mail_fee_second": cert_second,
         }
         save_fee_templates(self.fee_templates)
         self._refresh_fee_tree()
