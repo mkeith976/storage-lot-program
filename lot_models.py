@@ -33,6 +33,7 @@ class Vehicle:
     vehicle_type: str = "Car"
     make: str = ""
     model: str = ""
+    year: Optional[int] = None
     color: str = ""
     initial_mileage: float = 0.0
 
@@ -41,12 +42,20 @@ class Vehicle:
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "Vehicle":
+        year_val = data.get("year")
+        if year_val is not None:
+            try:
+                year_val = int(year_val)
+            except (ValueError, TypeError):
+                year_val = None
+        
         return Vehicle(
             plate=data.get("plate", ""),
             vin=data.get("vin", ""),
             vehicle_type=data.get("vehicle_type", "Car"),
             make=data.get("make", ""),
             model=data.get("model", ""),
+            year=year_val,
             color=data.get("color", ""),
             initial_mileage=float(data.get("initial_mileage", 0.0) or 0.0),
         )
@@ -120,26 +129,39 @@ class StorageContract:
     customer: Customer
     vehicle: Vehicle
     start_date: str
-    contract_type: str = "Storage Only"
-    daily_rate: float
-    tow_fee: float = 0.0
-    impound_fee: float = 0.0
-    admin_fee: float = 0.0
+    contract_type: str  # "storage", "tow", or "recovery"
+    
+    # Storage rate mode
+    rate_mode: str = "daily"  # "daily", "weekly", or "monthly"
+    daily_storage_fee: float = 0.0
+    weekly_storage_fee: float = 0.0
+    monthly_storage_fee: float = 0.0
+    
+    # Tow contract fields (voluntary tows)
     tow_base_fee: float = 0.0
-    mileage_included: float = 0.0
-    mileage_rate: float = 0.0
-    certified_mail_fee_first: float = 0.0
-    certified_mail_fee_second: float = 0.0
-    extra_labor_minutes: float = 0.0
-    labor_rate_per_hour: float = 0.0
-    recovery_miles: float = 0.0
-    extra_labor_minutes: float = 0.0
-    labor_rate_per_hour: float = 0.0
-    notes: List[str] = field(default_factory=list)
-    attachments: List[str] = field(default_factory=list)
-    payments: List[Payment] = field(default_factory=list)
-    fees: List[Fee] = field(default_factory=list)
-    notices: List[Notice] = field(default_factory=list)
+    tow_mileage_rate: float = 0.0
+    tow_miles_used: float = 0.0
+    tow_hourly_labor_rate: float = 0.0
+    tow_labor_hours: float = 0.0
+    tow_after_hours_fee: float = 0.0
+    
+    # Recovery contract fields (involuntary)
+    recovery_handling_fee: float = 0.0
+    lien_processing_fee: float = 0.0
+    cert_mail_fee: float = 0.0
+    title_search_fee: float = 0.0
+    dmv_fee: float = 0.0
+    sale_fee: float = 0.0
+    notices_sent: int = 0
+    
+    # Common fees
+    admin_fee: float = 0.0
+    
+    notes: List[str] = field(default_factory=lambda: [])
+    attachments: List[str] = field(default_factory=lambda: [])
+    payments: List[Payment] = field(default_factory=lambda: [])
+    fees: List[Fee] = field(default_factory=lambda: [])
+    notices: List[Notice] = field(default_factory=lambda: [])
     status: str = "Active"
     first_notice_sent_date: str = ""
     second_notice_sent_date: str = ""
@@ -152,20 +174,24 @@ class StorageContract:
             "vehicle": self.vehicle.to_dict(),
             "start_date": self.start_date,
             "contract_type": self.contract_type,
-            "daily_rate": self.daily_rate,
-            "tow_fee": self.tow_fee,
-            "impound_fee": self.impound_fee,
-            "admin_fee": self.admin_fee,
+            "rate_mode": self.rate_mode,
+            "daily_storage_fee": self.daily_storage_fee,
+            "weekly_storage_fee": self.weekly_storage_fee,
+            "monthly_storage_fee": self.monthly_storage_fee,
             "tow_base_fee": self.tow_base_fee,
-            "mileage_included": self.mileage_included,
-            "mileage_rate": self.mileage_rate,
-            "certified_mail_fee_first": self.certified_mail_fee_first,
-            "certified_mail_fee_second": self.certified_mail_fee_second,
-            "extra_labor_minutes": self.extra_labor_minutes,
-            "labor_rate_per_hour": self.labor_rate_per_hour,
-            "recovery_miles": self.recovery_miles,
-            "extra_labor_minutes": self.extra_labor_minutes,
-            "labor_rate_per_hour": self.labor_rate_per_hour,
+            "tow_mileage_rate": self.tow_mileage_rate,
+            "tow_miles_used": self.tow_miles_used,
+            "tow_hourly_labor_rate": self.tow_hourly_labor_rate,
+            "tow_labor_hours": self.tow_labor_hours,
+            "tow_after_hours_fee": self.tow_after_hours_fee,
+            "recovery_handling_fee": self.recovery_handling_fee,
+            "lien_processing_fee": self.lien_processing_fee,
+            "cert_mail_fee": self.cert_mail_fee,
+            "title_search_fee": self.title_search_fee,
+            "dmv_fee": self.dmv_fee,
+            "sale_fee": self.sale_fee,
+            "notices_sent": self.notices_sent,
+            "admin_fee": self.admin_fee,
             "notes": self.notes,
             "attachments": self.attachments,
             "payments": [p.to_dict() for p in self.payments],
@@ -184,21 +210,25 @@ class StorageContract:
             customer=Customer.from_dict(data.get("customer", {})),
             vehicle=Vehicle.from_dict(data.get("vehicle", {})),
             start_date=data.get("start_date", datetime.today().strftime(DATE_FORMAT)),
-            contract_type=data.get("contract_type", "Storage Only"),
-            daily_rate=float(data.get("daily_rate", 0.0) or 0.0),
-            tow_fee=float(data.get("tow_fee", 0.0) or 0.0),
-            impound_fee=float(data.get("impound_fee", 0.0) or 0.0),
-            admin_fee=float(data.get("admin_fee", 0.0) or 0.0),
+            contract_type=data.get("contract_type", "storage"),
+            rate_mode=data.get("rate_mode", "daily"),
+            daily_storage_fee=float(data.get("daily_storage_fee", 0.0) or 0.0),
+            weekly_storage_fee=float(data.get("weekly_storage_fee", 0.0) or 0.0),
+            monthly_storage_fee=float(data.get("monthly_storage_fee", 0.0) or 0.0),
             tow_base_fee=float(data.get("tow_base_fee", 0.0) or 0.0),
-            mileage_included=float(data.get("mileage_included", 0.0) or 0.0),
-            mileage_rate=float(data.get("mileage_rate", 0.0) or 0.0),
-            certified_mail_fee_first=float(data.get("certified_mail_fee_first", 0.0) or 0.0),
-            certified_mail_fee_second=float(data.get("certified_mail_fee_second", 0.0) or 0.0),
-            extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
-            labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
-            recovery_miles=float(data.get("recovery_miles", 0.0) or 0.0),
-            extra_labor_minutes=float(data.get("extra_labor_minutes", 0.0) or 0.0),
-            labor_rate_per_hour=float(data.get("labor_rate_per_hour", 0.0) or 0.0),
+            tow_mileage_rate=float(data.get("tow_mileage_rate", 0.0) or 0.0),
+            tow_miles_used=float(data.get("tow_miles_used", 0.0) or 0.0),
+            tow_hourly_labor_rate=float(data.get("tow_hourly_labor_rate", 0.0) or 0.0),
+            tow_labor_hours=float(data.get("tow_labor_hours", 0.0) or 0.0),
+            tow_after_hours_fee=float(data.get("tow_after_hours_fee", 0.0) or 0.0),
+            recovery_handling_fee=float(data.get("recovery_handling_fee", 0.0) or 0.0),
+            lien_processing_fee=float(data.get("lien_processing_fee", 0.0) or 0.0),
+            cert_mail_fee=float(data.get("cert_mail_fee", 0.0) or 0.0),
+            title_search_fee=float(data.get("title_search_fee", 0.0) or 0.0),
+            dmv_fee=float(data.get("dmv_fee", 0.0) or 0.0),
+            sale_fee=float(data.get("sale_fee", 0.0) or 0.0),
+            notices_sent=int(data.get("notices_sent", 0)),
+            admin_fee=float(data.get("admin_fee", 0.0) or 0.0),
             notes=list(data.get("notes", [])),
             attachments=list(data.get("attachments", [])),
             payments=[Payment.from_dict(p) for p in data.get("payments", [])],
@@ -213,7 +243,7 @@ class StorageContract:
 
 @dataclass
 class StorageData:
-    contracts: List[StorageContract] = field(default_factory=list)
+    contracts: List[StorageContract] = field(default_factory=lambda: [])
     next_id: int = 1
 
     def to_dict(self) -> Dict[str, Any]:

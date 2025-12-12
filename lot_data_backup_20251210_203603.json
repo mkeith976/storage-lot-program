@@ -1,0 +1,174 @@
+{
+  "next_id": 3,
+  "contracts": [
+    {
+      "contract_id": 1,
+      "customer": {
+        "name": "john doe",
+        "phone": "850",
+        "address": "123"
+      },
+      "vehicle": {
+        "plate": "abc",
+        "vin": "987",
+        "vehicle_type": "Car",
+        "make": "chevy",
+        "model": "camaro",
+        "color": "black",
+        "initial_mileage": 0.0
+      },
+      "start_date": "2025-1-09",
+      "contract_type": "Storage Only",
+      "daily_rate": 35.0,
+      "tow_fee": 150.0,
+      "impound_fee": 75.0,
+      "admin_fee": 25.0,
+      "tow_base_fee": 0.0,
+      "mileage_included": 0.0,
+      "mileage_rate": 0.0,
+      "certified_mail_fee_first": 0.0,
+      "certified_mail_fee_second": 0.0,
+      "extra_labor_minutes": 15.0,
+      "labor_rate_per_hour": 45.0,
+      "recovery_miles": 28.0,
+      "notes": [],
+      "attachments": [],
+      "payments": [
+        {
+          "date": "2025-12-09",
+          "amount": 100.0,
+          "method": "cash",
+          "note": ""
+        }
+      ],
+      "fees": [
+        {
+          "name": "Storage",
+          "amount": 35.0,
+          "category": "storage",
+          "is_default": true
+        },
+        {
+          "name": "Tow/Impound",
+          "amount": 225.0,
+          "category": "impound",
+          "is_default": true
+        },
+        {
+          "name": "Admin",
+          "amount": 25.0,
+          "category": "admin",
+          "is_default": true
+        },
+        {
+          "name": "Tow Base",
+          "amount": 0.0,
+          "category": "recovery",
+          "is_default": true
+        },
+        {
+          "name": "Certified Mail 1st",
+          "amount": 0.0,
+          "category": "recovery",
+          "is_default": true
+        },
+        {
+          "name": "Certified Mail 2nd",
+          "amount": 0.0,
+          "category": "recovery",
+          "is_default": true
+        }
+      ],
+      "notices": [
+        {
+          "notice_type": "1st",
+          "date_generated": "2025-12-09",
+          "date_sent": null,
+          "amount_due": 11986.25,
+          "notes": ""
+        }
+      ],
+      "status": "Active",
+      "first_notice_sent_date": "2025-12-09",
+      "second_notice_sent_date": "",
+      "lien_eligible_date": "2025-03-20"
+    },
+    {
+      "contract_id": 2,
+      "customer": {
+        "name": "xyz",
+        "phone": "123",
+        "address": "456"
+      },
+      "vehicle": {
+        "plate": "789",
+        "vin": "fvghjkl",
+        "vehicle_type": "Car",
+        "make": "ford",
+        "model": "f150",
+        "color": "white",
+        "initial_mileage": 0.0
+      },
+      "start_date": "2025-12-09",
+      "contract_type": "Tow & Recovery",
+      "daily_rate": 35.0,
+      "tow_fee": 150.0,
+      "impound_fee": 75.0,
+      "admin_fee": 25.0,
+      "tow_base_fee": 150.0,
+      "mileage_included": 5.0,
+      "mileage_rate": 3.5,
+      "certified_mail_fee_first": 8.5,
+      "certified_mail_fee_second": 8.5,
+      "extra_labor_minutes": 0.0,
+      "labor_rate_per_hour": 45.0,
+      "recovery_miles": 0.0,
+      "notes": [],
+      "attachments": [],
+      "payments": [],
+      "fees": [
+        {
+          "name": "Storage",
+          "amount": 35.0,
+          "category": "storage",
+          "is_default": true
+        },
+        {
+          "name": "Tow/Impound",
+          "amount": 225.0,
+          "category": "impound",
+          "is_default": true
+        },
+        {
+          "name": "Admin",
+          "amount": 25.0,
+          "category": "admin",
+          "is_default": true
+        },
+        {
+          "name": "Tow Base",
+          "amount": 150.0,
+          "category": "recovery",
+          "is_default": true
+        },
+        {
+          "name": "Certified Mail 1st",
+          "amount": 8.5,
+          "category": "recovery",
+          "is_default": true
+        },
+        {
+          "name": "Certified Mail 2nd",
+          "amount": 8.5,
+          "category": "recovery",
+          "is_default": true
+        }
+      ],
+      "notices": [],
+      "status": "Active",
+      "first_notice_sent_date": "",
+      "second_notice_sent_date": "",
+      "lien_eligible_date": "2026-02-17"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "Car": {
+    "daily_rate": 48.77,
+    "tow_fee": 182.89,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 182.89,
+    "mileage_included": 10.0,
+    "mileage_rate": 4.88,
+    "labor_rate": 182.92,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  },
+  "Truck": {
+    "daily_rate": 48.77,
+    "tow_fee": 182.89,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 182.89,
+    "mileage_included": 10.0,
+    "mileage_rate": 4.88,
+    "labor_rate": 182.92,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  },
+  "Motorcycle": {
+    "daily_rate": 6.5,
+    "tow_fee": 0.0,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 0.0,
+    "mileage_included": 0.0,
+    "mileage_rate": 0.0,
+    "labor_rate": 0.0,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  },
+  "RV": {
+    "daily_rate": 6.5,
+    "tow_fee": 182.89,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 182.89,
+    "mileage_included": 10.0,
+    "mileage_rate": 4.88,
+    "labor_rate": 182.92,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  },
+  "Boat": {
+    "daily_rate": 6.5,
+    "tow_fee": 182.89,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 0.0,
+    "mileage_included": 0.0,
+    "mileage_rate": 0.0,
+    "labor_rate": 0.0,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  },
+  "Trailer": {
+    "daily_rate": 6.5,
+    "tow_fee": 0.0,
+    "impound_fee": 0.0,
+    "admin_fee": 60.96,
+    "tow_base_fee": 0.0,
+    "mileage_included": 0.0,
+    "mileage_rate": 0.0,
+    "labor_rate": 0.0,
+    "certified_mail_fee_first": 10.0,
+    "certified_mail_fee_second": 20.0
+  }
+}
