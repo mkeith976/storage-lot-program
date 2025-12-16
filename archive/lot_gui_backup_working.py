@@ -4,53 +4,35 @@ from __future__ import annotations
 import sys
 import traceback
 import csv
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
-from collections import defaultdict
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTabWidget, QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QLineEdit, QComboBox, QTextEdit, QMessageBox, QDialog,
     QFormLayout, QSpinBox, QCheckBox, QFileDialog, QMenu, QMenuBar,
-    QHeaderView, QFrame, QScrollArea, QRadioButton, QButtonGroup,
-    QListWidget, QListWidgetItem
+    QHeaderView, QFrame, QScrollArea, QRadioButton, QButtonGroup
 )
-from PyQt6.QtCore import Qt, QSize, QPoint, QRect, pyqtSignal, QEvent
+from PyQt6.QtCore import Qt, QSize, QPoint, pyqtSignal, QEvent
 from PyQt6.QtGui import QFont, QColor, QPalette, QIcon, QAction
 
-from logic.lot_logic import (
+from lot_logic import (
     add_notice, balance, default_fee_schedule,
     format_contract_summary, format_contract_record, lien_eligibility,
     lien_timeline, past_due_status,
     record_payment, storage_days,
 )
-from models.lot_models import Customer, Vehicle, StorageContract, StorageData, DATE_FORMAT, Payment
-from utils.persistence import (
-    load_data, save_data, load_fee_templates, save_fee_templates,
-    backup_data as create_backup, DATA_PATH
-)
-from utils.config import ENABLE_INVOLUNTARY_TOWS, MAX_ADMIN_FEE, MAX_LIEN_FEE, TOW_STORAGE_EXEMPTION_HOURS
-from utils.theme_config import (
-    get_theme_colors, get_application_stylesheet,
-    get_title_bar_widget_style, get_title_bar_menu_button_style,
-    get_title_bar_search_style, get_title_bar_control_button_style,
-    get_content_widget_style
-)
-from ui.theme_manager import ThemeManager
-from ui.dashboard import create_dashboard_widget
-from utils.cursor_loader import get_resize_cursors
-from ui.settings_dialog import SettingsDialog
-from ui.app_settings_dialog import AppSettingsDialog
-from ui.app_settings_dialog import AppSettingsDialog
-from ui.settings_dialog import SettingsDialog
-from ui.settings_dialog import SettingsDialog
+from lot_models import Customer, Vehicle, StorageContract, StorageData, DATE_FORMAT
+from persistence import load_data, save_data, load_fee_templates, save_fee_templates
+from config import ENABLE_INVOLUNTARY_TOWS, MAX_ADMIN_FEE, MAX_LIEN_FEE, TOW_STORAGE_EXEMPTION_HOURS
+from theme_config import get_theme_colors, get_application_stylesheet
 
 
 class CustomTitleBar(QWidget):
     """Custom title bar with menu bar and window controls."""
+    """Custom title bar with window controls."""
     
     close_clicked = pyqtSignal()
     minimize_clicked = pyqtSignal()
@@ -58,6 +40,7 @@ class CustomTitleBar(QWidget):
     
     def __init__(self, parent=None, theme_colors=None):
         super().__init__(parent)
+        from theme_config import get_theme_colors
         self.theme_colors = theme_colors if theme_colors else get_theme_colors("Dark")
         self.drag_position = QPoint()
         self.menu_callbacks = {}  # Store menu callbacks
@@ -67,7 +50,20 @@ class CustomTitleBar(QWidget):
         """Setup the title bar UI."""
         self.setFixedHeight(40)
         self.setContentsMargins(0, 0, 0, 0)
-        self.setStyleSheet(get_title_bar_widget_style(self.theme_colors))
+        self.setStyleSheet(f"""
+            CustomTitleBar {{
+                background-color: {self.theme_colors['titlebar_bg']};
+                color: {self.theme_colors['titlebar_fg']};
+                border: none;
+                margin: 0px;
+                padding: 0px;
+            }}
+            QWidget {{
+                background-color: {self.theme_colors['titlebar_bg']};
+                color: {self.theme_colors['titlebar_fg']};
+                border: none;
+            }}
+        """)
         
         # Clear existing layout if any
         if self.layout():
@@ -78,7 +74,18 @@ class CustomTitleBar(QWidget):
         layout.setSpacing(0)
         
         # Menu button style
-        menu_btn_style = get_title_bar_menu_button_style(self.theme_colors)
+        menu_btn_style = f"""
+            QPushButton {{
+                border: none;
+                padding: 10px 15px;
+                color: {self.theme_colors['titlebar_fg']};
+                background-color: transparent;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {self.theme_colors['button_hover']};
+            }}
+        """
         
         # File menu button (left)
         self.file_btn = QPushButton("File")
@@ -109,11 +116,6 @@ class CustomTitleBar(QWidget):
         if 'help' in self.menu_callbacks:
             self.help_btn.clicked.connect(self.menu_callbacks['help'])
         
-        # Enable mouse tracking on buttons for hover detection
-        self.file_btn.setMouseTracking(True)
-        self.edit_btn.setMouseTracking(True)
-        self.help_btn.setMouseTracking(True)
-        
         layout.addStretch()
         
         # App title (centered) - this will be the drag handle
@@ -133,14 +135,36 @@ class CustomTitleBar(QWidget):
         self.search_box = QLineEdit()
         self.search_box.setPlaceholderText("Search...")
         self.search_box.setFixedWidth(200)
-        self.search_box.setStyleSheet(get_title_bar_search_style(self.theme_colors))
+        self.search_box.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {self.theme_colors['entry_bg']};
+                color: {self.theme_colors['entry_fg']};
+                border: 1px solid {self.theme_colors['border']};
+                padding: 6px 10px;
+                border-radius: 4px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {self.theme_colors['accent']};
+            }}
+        """)
         layout.addWidget(self.search_box)
         
         # Spacing before window controls
         layout.addSpacing(10)
         
         # Window control buttons (right)
-        btn_style = get_title_bar_control_button_style(self.theme_colors)
+        btn_style = """
+            QPushButton {
+                border: none;
+                padding: 10px 15px;
+                color: %s;
+                background-color: transparent;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: %s;
+            }
+        """
         
         self.min_btn = QPushButton("—")
         self.min_btn.setStyleSheet(btn_style % (self.theme_colors['titlebar_fg'], self.theme_colors['button_hover']))
@@ -154,8 +178,10 @@ class CustomTitleBar(QWidget):
         self.max_btn.setFixedSize(45, 40)
         layout.addWidget(self.max_btn)
         
+        close_style = btn_style % (self.theme_colors['titlebar_fg'], "#e81123") + \
+                     "QPushButton:hover { color: #ffffff; }"
         self.close_btn = QPushButton("✕")
-        self.close_btn.setStyleSheet(btn_style % (self.theme_colors['titlebar_fg'], "#e81123"))
+        self.close_btn.setStyleSheet(close_style)
         self.close_btn.clicked.connect(self.close_clicked.emit)
         self.close_btn.setFixedSize(45, 40)
         layout.addWidget(self.close_btn)
@@ -333,20 +359,9 @@ class LotAppQt(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        self.current_theme = "Dark"
         self.storage_data: StorageData = load_data()
         self.fee_templates: Dict[str, Dict[str, float]] = load_fee_templates()
-        
-        # Initialize settings manager
-        from utils.settings_manager import SettingsManager
-        self.settings_manager = SettingsManager()
-        
-        # Auto-backup on startup if enabled
-        self.auto_backup_on_startup()
-        
-        # Initialize theme manager
-        self.theme_manager = ThemeManager(self)
-        self.current_theme = self.settings_manager.get('theme', 'Dark')
-        self.theme_manager.current_theme = self.current_theme
         
         # Resizing variables
         self.resizing = False
@@ -355,79 +370,16 @@ class LotAppQt(QMainWindow):
         self.resize_start_geometry = None
         self.resize_margin = 10
         self.current_cursor_edge = None  # Track which edge cursor is showing
-        self.menu_is_open = False  # Track if any menu is currently open
-        self.active_menu = None  # Track which menu is currently displayed
-        
-        # Try to load custom cursors from system theme
-        self.custom_cursors = None
-        try:
-            self.custom_cursors = get_resize_cursors()
-        except Exception:
-            pass  # Fall back to Qt default cursors
         
         self.init_ui()
-        self.theme_manager.apply_theme(self.current_theme)
-        
-        # Select startup tab from settings
-        startup_tab = self.settings_manager.get('startup_tab', 'Dashboard')
-        tab_map = {
-            'Dashboard': 0,
-            'Intake': 1,
-            'Contracts': 2,
-            'Yard View': 3
-        }
-        if startup_tab in tab_map:
-            self.tabs.setCurrentIndex(tab_map[startup_tab])
+        self.load_theme_preference()
+        self.apply_theme(self.current_theme)
         
         # Check for urgent items on startup
         self.check_urgent_alerts()
         
         # Enable mouse tracking for resize detection
         self.setMouseTracking(True)
-    
-    def auto_backup_on_startup(self):
-        """Create automatic backup on application startup."""
-        try:
-            import os
-            import shutil
-            from pathlib import Path
-            from datetime import timedelta
-            
-            # Get backup settings
-            if not self.settings_manager.get('auto_backup_enabled', True):
-                return
-            
-            backup_location = self.settings_manager.get('backup_location', 'backups')
-            
-            # Create backup directory if it doesn't exist
-            backup_dir = Path(backup_location)
-            backup_dir.mkdir(exist_ok=True)
-            
-            # Create timestamped backup
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            backup_file = backup_dir / f"auto_backup_{timestamp}.json"
-            
-            # Copy current data file
-            data_file = Path("data/lot_data.json")
-            if data_file.exists():
-                shutil.copy2(data_file, backup_file)
-                
-                # Clean up old backups if retention limit set
-                retention_days = self.settings_manager.get('backup_retention_days', 30)
-                if retention_days > 0:
-                    cutoff_date = datetime.now() - timedelta(days=retention_days)
-                    for old_backup in backup_dir.glob("auto_backup_*.json"):
-                        # Extract timestamp from filename
-                        try:
-                            file_timestamp_str = old_backup.stem.replace("auto_backup_", "")
-                            file_timestamp = datetime.strptime(file_timestamp_str, "%Y-%m-%d_%H-%M-%S")
-                            if file_timestamp < cutoff_date:
-                                old_backup.unlink()
-                        except (ValueError, OSError):
-                            pass  # Skip files with unexpected format
-                            
-        except Exception as e:
-            print(f"Auto-backup failed: {e}")  # Silent failure, don't interrupt startup
         
         # Install event filter on application to capture ALL mouse events globally
         QApplication.instance().installEventFilter(self)
@@ -441,6 +393,7 @@ class LotAppQt(QMainWindow):
         
         # Central widget
         central_widget = QWidget()
+        central_widget.setStyleSheet("border: none; margin: 0; padding: 0;")
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -467,19 +420,9 @@ class LotAppQt(QMainWindow):
         
         self.file_menu.addSeparator()
         
-        # Contract actions
-        self.print_contract_action = QAction("Print Contract Summary", self)
-        self.print_contract_action.triggered.connect(self.print_contract_summary)
-        self.print_contract_action.setEnabled(False)
-        self.file_menu.addAction(self.print_contract_action)
-        
-        self.print_action = QAction("Print Record", self)
-        self.print_action.triggered.connect(self.print_record)
-        self.file_menu.addAction(self.print_action)
-        
-        export_csv_action = QAction("Export Contracts to CSV...", self)
-        export_csv_action.triggered.connect(self.export_to_csv)
-        self.file_menu.addAction(export_csv_action)
+        print_action = QAction("Print", self)
+        print_action.triggered.connect(self.print_record)
+        self.file_menu.addAction(print_action)
         
         export_action = QAction("Export Summary", self)
         export_action.triggered.connect(self.export_summary)
@@ -492,39 +435,11 @@ class LotAppQt(QMainWindow):
         self.file_menu.addAction(exit_action)
         
         self.edit_menu = QMenu(self)
-        
-        # Contract editing actions
-        self.edit_contract_action = QAction("Edit Contract...", self)
-        self.edit_contract_action.triggered.connect(self.edit_contract)
-        self.edit_contract_action.setEnabled(False)
-        self.edit_menu.addAction(self.edit_contract_action)
-        
-        self.record_payment_action = QAction("Record Payment...", self)
-        self.record_payment_action.triggered.connect(self.record_payment)
-        self.record_payment_action.setEnabled(False)
-        self.edit_menu.addAction(self.record_payment_action)
-        
-        self.manage_attachments_action = QAction("Manage Attachments...", self)
-        self.manage_attachments_action.triggered.connect(self.manage_attachments)
-        self.manage_attachments_action.setEnabled(False)
-        self.edit_menu.addAction(self.manage_attachments_action)
-        
-        self.generate_lien_action = QAction("Generate Lien Notice...", self)
-        self.generate_lien_action.triggered.connect(self.generate_lien_notice)
-        self.generate_lien_action.setEnabled(False)
-        self.edit_menu.addAction(self.generate_lien_action)
+        theme_action = QAction("Toggle Theme (Dark/Light)", self)
+        theme_action.triggered.connect(self.toggle_theme)
+        self.edit_menu.addAction(theme_action)
         
         self.help_menu = QMenu(self)
-        
-        app_settings_action = QAction("⚙️ Settings", self)
-        app_settings_action.triggered.connect(self.show_app_settings)
-        self.help_menu.addAction(app_settings_action)
-        
-        fees_action = QAction("💵 Fees", self)
-        fees_action.triggered.connect(self.show_fee_settings)
-        self.help_menu.addAction(fees_action)
-        
-        self.help_menu.addSeparator()
         
         alerts_action = QAction("🔔 Check for Urgent Alerts", self)
         alerts_action.triggered.connect(self.manual_alert_check)
@@ -558,11 +473,12 @@ class LotAppQt(QMainWindow):
         self.title_bar.search_box.textChanged.connect(self.filter_contracts)
         
         # Content area with padding
-        self.content_widget = QWidget()
-        content_layout = QVBoxLayout(self.content_widget)
+        content_widget = QWidget()
+        content_widget.setStyleSheet(f"border: none; background-color: {get_theme_colors(self.current_theme)['titlebar_bg']}; margin-top: 0px; padding-top: 0px;")
+        content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
-        main_layout.addWidget(self.content_widget, 0)
+        main_layout.addWidget(content_widget, 0)
         
         # Tab widget
         self.tabs = QTabWidget()
@@ -571,6 +487,7 @@ class LotAppQt(QMainWindow):
         
         # Status bar
         self.status_label = QLabel("Ready")
+        self.status_label.setStyleSheet("padding: 5px;")
         content_layout.addWidget(self.status_label)
         
         # Create tabs
@@ -578,10 +495,199 @@ class LotAppQt(QMainWindow):
         self.create_contracts_tab()
         self.create_intake_tab()
         self.create_reports_tab()
+        self.create_fee_tab()
     
     def create_dashboard_tab(self):
-        """Create the dashboard overview tab using modular dashboard component."""
-        dashboard_widget = create_dashboard_widget(self.theme_manager, self.storage_data, self)
+        """Create the dashboard overview tab."""
+        dashboard_widget = QWidget()
+        layout = QVBoxLayout(dashboard_widget)
+        layout.setSpacing(15)
+        
+        # Dashboard title
+        title = QLabel("📊 Dashboard Overview")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("padding: 10px; color: #0078d4;")
+        layout.addWidget(title)
+        
+        # Calculate statistics
+        total_contracts = len(self.storage_data.contracts)
+        active_contracts = sum(1 for c in self.storage_data.contracts if c.status != "Paid")
+        total_revenue = sum(balance(c, include_breakdown=False) for c in self.storage_data.contracts)
+        total_paid = sum(sum(p.amount for p in c.payments) for c in self.storage_data.contracts)
+        outstanding = sum(balance(c, include_breakdown=False) for c in self.storage_data.contracts if balance(c) > 0)
+        
+        # Count by type
+        storage_count = sum(1 for c in self.storage_data.contracts if c.contract_type.lower() == "storage")
+        tow_count = sum(1 for c in self.storage_data.contracts if c.contract_type.lower() == "tow")
+        recovery_count = sum(1 for c in self.storage_data.contracts if c.contract_type.lower() == "recovery")
+        
+        # Past due contracts
+        past_due_contracts = [c for c in self.storage_data.contracts if past_due_status(c)[0]]
+        past_due_count = len(past_due_contracts)
+        past_due_amount = sum(balance(c) for c in past_due_contracts)
+        
+        # Lien eligible contracts
+        lien_eligible_contracts = [c for c in self.storage_data.contracts if lien_eligibility(c)[0]]
+        lien_eligible_count = len(lien_eligible_contracts)
+        
+        # Sale eligible contracts
+        sale_eligible_contracts = [c for c in self.storage_data.contracts 
+                                   if lien_timeline(c).get("is_sale_eligible", False)]
+        sale_eligible_count = len(sale_eligible_contracts)
+        
+        # Summary cards row
+        cards_layout = QHBoxLayout()
+        
+        # Card 1: Total Contracts
+        card1 = self.create_stat_card("Total Contracts", str(total_contracts), 
+                                      f"{active_contracts} active", "#0078d4")
+        cards_layout.addWidget(card1)
+        
+        # Card 2: Revenue
+        card2 = self.create_stat_card("Total Revenue", f"${total_paid:,.2f}", 
+                                      f"${outstanding:,.2f} outstanding", "#2e7d32")
+        cards_layout.addWidget(card2)
+        
+        # Card 3: Past Due
+        color3 = "#c62828" if past_due_count > 0 else "#757575"
+        card3 = self.create_stat_card("Past Due", str(past_due_count), 
+                                      f"${past_due_amount:,.2f}" if past_due_count > 0 else "All current",
+                                      color3)
+        cards_layout.addWidget(card3)
+        
+        # Card 4: Lien Eligible
+        color4 = "#e65100" if lien_eligible_count > 0 else "#757575"
+        card4 = self.create_stat_card("Lien Eligible", str(lien_eligible_count),
+                                      f"{sale_eligible_count} sale eligible", color4)
+        cards_layout.addWidget(card4)
+        
+        layout.addLayout(cards_layout)
+        
+        # Contract type breakdown
+        breakdown_label = QLabel("Contract Type Breakdown")
+        breakdown_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        breakdown_label.setStyleSheet("padding-top: 10px;")
+        layout.addWidget(breakdown_label)
+        
+        breakdown_layout = QHBoxLayout()
+        
+        # Storage
+        storage_revenue = sum(balance(c, include_breakdown=False) for c in self.storage_data.contracts 
+                            if c.contract_type.lower() == "storage")
+        storage_widget = self.create_type_card("Storage Contracts", storage_count, 
+                                              storage_revenue, "#0078d4")
+        breakdown_layout.addWidget(storage_widget)
+        
+        # Tow
+        tow_revenue = sum(balance(c, include_breakdown=False) for c in self.storage_data.contracts 
+                         if c.contract_type.lower() == "tow")
+        tow_widget = self.create_type_card("Tow Contracts", tow_count, 
+                                          tow_revenue, "#2e7d32")
+        breakdown_layout.addWidget(tow_widget)
+        
+        # Recovery
+        recovery_revenue = sum(balance(c, include_breakdown=False) for c in self.storage_data.contracts 
+                              if c.contract_type.lower() == "recovery")
+        recovery_widget = self.create_type_card("Recovery Contracts", recovery_count, 
+                                               recovery_revenue, "#c62828")
+        breakdown_layout.addWidget(recovery_widget)
+        
+        layout.addLayout(breakdown_layout)
+        
+        # Upcoming deadlines section
+        deadline_label = QLabel("⚠️ Upcoming Deadlines (Next 7 Days)")
+        deadline_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        deadline_label.setStyleSheet("padding-top: 10px; color: #c62828;")
+        layout.addWidget(deadline_label)
+        
+        # Find contracts with upcoming deadlines
+        upcoming = []
+        today = datetime.today()
+        
+        for contract in self.storage_data.contracts:
+            timeline = lien_timeline(contract)
+            
+            # Check various deadline dates
+            for key, date_str in timeline.items():
+                if date_str and key.endswith('_date') or key.endswith('_due'):
+                    try:
+                        deadline_date = datetime.strptime(date_str, "%Y-%m-%d")
+                        days_until = (deadline_date - today).days
+                        
+                        if 0 <= days_until <= 7:
+                            upcoming.append({
+                                'contract_id': contract.contract_id,
+                                'customer': contract.customer.name,
+                                'vehicle': f"{contract.vehicle.vehicle_type} {contract.vehicle.plate}",
+                                'deadline': key.replace('_', ' ').title(),
+                                'date': date_str,
+                                'days': days_until
+                            })
+                    except:
+                        pass
+        
+        if upcoming:
+            # Sort by days until deadline
+            upcoming.sort(key=lambda x: x['days'])
+            
+            # Create table for upcoming items
+            deadline_table = QTableWidget()
+            deadline_table.setColumnCount(5)
+            deadline_table.setHorizontalHeaderLabels(['ID', 'Customer', 'Vehicle', 'Deadline Type', 'Days'])
+            deadline_table.setRowCount(min(len(upcoming), 10))  # Show max 10
+            deadline_table.setMaximumHeight(250)
+            
+            for i, item in enumerate(upcoming[:10]):
+                deadline_table.setItem(i, 0, QTableWidgetItem(str(item['contract_id'])))
+                deadline_table.setItem(i, 1, QTableWidgetItem(item['customer']))
+                deadline_table.setItem(i, 2, QTableWidgetItem(item['vehicle']))
+                deadline_table.setItem(i, 3, QTableWidgetItem(item['deadline']))
+                
+                days_item = QTableWidgetItem(f"{item['days']} days" if item['days'] > 0 else "TODAY!")
+                if item['days'] == 0:
+                    days_item.setForeground(QColor("#c62828"))
+                    days_item.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+                deadline_table.setItem(i, 4, days_item)
+            
+            deadline_table.horizontalHeader().setStretchLastSection(True)
+            layout.addWidget(deadline_table)
+        else:
+            no_deadlines = QLabel("✓ No urgent deadlines in the next 7 days")
+            no_deadlines.setStyleSheet("color: #2e7d32; padding: 10px; font-style: italic;")
+            layout.addWidget(no_deadlines)
+        
+        # Quick actions
+        actions_label = QLabel("Quick Actions")
+        actions_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        actions_label.setStyleSheet("padding-top: 10px;")
+        layout.addWidget(actions_label)
+        
+        actions_layout = QHBoxLayout()
+        
+        new_contract_btn = QPushButton("➕ New Contract")
+        new_contract_btn.clicked.connect(lambda: self.tabs.setCurrentIndex(2))  # Switch to intake tab
+        new_contract_btn.setMinimumHeight(40)
+        actions_layout.addWidget(new_contract_btn)
+        
+        export_btn = QPushButton("📊 Export Data")
+        export_btn.clicked.connect(self.export_to_csv)
+        export_btn.setMinimumHeight(40)
+        actions_layout.addWidget(export_btn)
+        
+        backup_btn = QPushButton("💾 Backup Data")
+        backup_btn.clicked.connect(self.backup_data)
+        backup_btn.setMinimumHeight(40)
+        actions_layout.addWidget(backup_btn)
+        
+        refresh_btn = QPushButton("🔄 Refresh Dashboard")
+        refresh_btn.clicked.connect(self.refresh_dashboard)
+        refresh_btn.setMinimumHeight(40)
+        actions_layout.addWidget(refresh_btn)
+        
+        layout.addLayout(actions_layout)
+        
+        layout.addStretch()
+        
         self.tabs.addTab(dashboard_widget, "Dashboard")
         self.update_notification_badge()
     
@@ -618,7 +724,7 @@ class LotAppQt(QMainWindow):
                         if days_until <= 0:
                             urgent_count += 1
                             break  # Only count each contract once
-                    except (ValueError, KeyError, AttributeError):
+                    except:
                         pass
         
         return urgent_count
@@ -651,7 +757,7 @@ class LotAppQt(QMainWindow):
                                 'date': date_str,
                                 'status': status
                             })
-                    except (ValueError, KeyError, AttributeError):
+                    except:
                         pass
             
             if contract_alerts:
@@ -669,12 +775,6 @@ class LotAppQt(QMainWindow):
     
     def show_urgent_alerts_dialog(self, urgent_items):
         """Display dialog with urgent items requiring attention."""
-        colors = get_theme_colors(self.current_theme)
-        
-        # Define theme-aware status colors
-        danger_color = '#c62828' if self.current_theme == 'Light' else '#f44336'
-        danger_bg = '#ffebee' if self.current_theme == 'Light' else '#5c2626'
-        
         dialog = QDialog(self)
         dialog.setWindowTitle("⚠️ Urgent Items Requiring Attention")
         dialog.setMinimumSize(700, 500)
@@ -684,7 +784,7 @@ class LotAppQt(QMainWindow):
         # Warning header
         header = QLabel(f"🚨 {len(urgent_items)} contract(s) have urgent deadlines TODAY or OVERDUE!")
         header.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
-        header.setStyleSheet(f"color: {danger_color}; padding: 10px; background-color: {danger_bg}; border-radius: 5px;")
+        header.setStyleSheet("color: #c62828; padding: 10px; background-color: #ffebee; border-radius: 5px;")
         layout.addWidget(header)
         
         # Scrollable list of urgent items
@@ -696,7 +796,7 @@ class LotAppQt(QMainWindow):
         for item in urgent_items:
             item_frame = QFrame()
             item_frame.setFrameStyle(QFrame.Shape.Box)
-            item_frame.setStyleSheet(f"border: 2px solid {danger_color}; border-radius: 5px; padding: 10px; margin: 5px;")
+            item_frame.setStyleSheet("border: 2px solid #c62828; border-radius: 5px; padding: 10px; margin: 5px;")
             item_layout = QVBoxLayout(item_frame)
             
             # Contract info
@@ -710,7 +810,7 @@ class LotAppQt(QMainWindow):
             # Alerts
             for alert in item['alerts']:
                 alert_label = QLabel(f"  ⚠️ {alert['deadline']}: {alert['date']} - <b>{alert['status']}</b>")
-                alert_label.setStyleSheet(f"color: {danger_color};")
+                alert_label.setStyleSheet("color: #c62828;")
                 item_layout.addWidget(alert_label)
             
             scroll_layout.addWidget(item_frame)
@@ -734,35 +834,173 @@ class LotAppQt(QMainWindow):
         
         dialog.exec()
     
-    # create_stat_card moved to ui/dashboard.py module
+    def create_stat_card(self, title, value, subtitle, color):
+        """Create a statistic card widget."""
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.Box)
+        card.setLineWidth(2)
+        card.setStyleSheet(f"""
+            QFrame {{
+                border: 2px solid {color};
+                border-radius: 8px;
+                background-color: #ffffff;
+                padding: 15px;
+            }}
+        """)
+        
+        card_layout = QVBoxLayout(card)
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
+        card_layout.addWidget(title_label)
+        
+        value_label = QLabel(value)
+        value_label.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+        value_label.setStyleSheet(f"color: {color};")
+        card_layout.addWidget(value_label)
+        
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setStyleSheet("color: #757575; font-size: 10px;")
+        card_layout.addWidget(subtitle_label)
+        
+        return card
     
-    # create_type_card moved to ui/dashboard.py module
+    def create_type_card(self, title, count, revenue, color):
+        """Create a contract type breakdown card."""
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.Box)
+        card.setStyleSheet(f"""
+            QFrame {{
+                border: 1px solid {color};
+                border-radius: 5px;
+                background-color: #f9f9f9;
+                padding: 10px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(card)
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet(f"color: {color}; font-weight: bold;")
+        layout.addWidget(title_label)
+        
+        count_label = QLabel(f"Count: {count}")
+        layout.addWidget(count_label)
+        
+        revenue_label = QLabel(f"Revenue: ${revenue:,.2f}")
+        revenue_label.setStyleSheet("font-weight: bold;")
+        layout.addWidget(revenue_label)
+        
+        return card
     
     def refresh_dashboard(self):
         """Refresh the dashboard with current data."""
         # Store current tab to restore after refresh
         current_tab = self.tabs.currentIndex()
         
-        # Get the last tab index (dashboard will be added there by create_dashboard_tab)
-        last_tab_index = self.tabs.count()
-        
-        # Recreate dashboard using the theme-aware method (it adds to the end)
-        self.create_dashboard_tab()
-        
-        # Move the newly created dashboard tab from the end to position 0
-        dashboard_widget = self.tabs.widget(last_tab_index)
-        dashboard_tab_text = self.tabs.tabText(last_tab_index)
-        self.tabs.removeTab(last_tab_index)
-        
-        # Remove the old dashboard at position 0
+        # Remove the first tab (Contracts overview)
         self.tabs.removeTab(0)
         
-        # Insert the new dashboard at position 0
-        self.tabs.insertTab(0, dashboard_widget, dashboard_tab_text)
+        # Recreate dashboard
+        dashboard_widget = QWidget()
+        layout = QVBoxLayout(dashboard_widget)
+        layout.setSpacing(15)
         
-        # Restore the previously active tab
-        self.tabs.setCurrentIndex(current_tab)
+        # Dashboard title
+        title = QLabel("📊 Dashboard Overview")
+        title.setStyleSheet("font-size: 20px; font-weight: bold; padding: 10px;")
+        layout.addWidget(title)
+        
+        # Load current data
+        data = load_data()
+        
+        # Stats section
+        stats_frame = QFrame()
+        stats_frame.setStyleSheet("padding: 10px; border: 1px solid #ddd; border-radius: 5px;")
+        stats_layout = QHBoxLayout(stats_frame)
+        
+        total_contracts = len(data.contracts)
+        active_contracts = sum(1 for c in data.contracts if balance(c, datetime.today()) > 0)
+        
+        total_label = QLabel(f"<b>Total Contracts:</b> {total_contracts}")
+        total_label.setStyleSheet("font-size: 14px; padding: 5px;")
+        active_label = QLabel(f"<b>Active Contracts:</b> {active_contracts}")
+        active_label.setStyleSheet("font-size: 14px; padding: 5px;")
+        
+        stats_layout.addWidget(total_label)
+        stats_layout.addWidget(active_label)
+        stats_layout.addStretch()
+        
+        layout.addWidget(stats_frame)
+        
+        # Urgent items section
+        urgent_label = QLabel("⚠️ Urgent Items")
+        urgent_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 5px; margin-top: 10px;")
+        layout.addWidget(urgent_label)
+        
+        urgent_table = QTableWidget()
+        urgent_table.setColumnCount(4)
+        urgent_table.setHorizontalHeaderLabels(["Contract ID", "Type", "Vehicle", "Action Needed"])
+        urgent_table.horizontalHeader().setStretchLastSection(True)
+        
+        # Find urgent items
+        today = datetime.today()
+        urgent_items = []
+        for contract in data.contracts:
+            if balance(contract, today) > 0:
+                timeline = lien_timeline(contract)
+                # Check for urgent dates
+                for key, value in timeline.items():
+                    if isinstance(value, datetime):
+                        if value.date() <= today.date():
+                            urgent_items.append({
+                                "contract_id": contract.contract_id,
+                                "type": contract.contract_type,
+                                "vehicle": f"{contract.vehicle.year} {contract.vehicle.make} {contract.vehicle.model}",
+                                "action": key.replace("_", " ").title()
+                            })
+        
+        urgent_table.setRowCount(len(urgent_items))
+        for i, item in enumerate(urgent_items):
+            urgent_table.setItem(i, 0, QTableWidgetItem(item["contract_id"]))
+            urgent_table.setItem(i, 1, QTableWidgetItem(item["type"]))
+            urgent_table.setItem(i, 2, QTableWidgetItem(item["vehicle"]))
+            urgent_table.setItem(i, 3, QTableWidgetItem(item["action"]))
+        
+        layout.addWidget(urgent_table)
+        
+        # Quick actions
+        actions_label = QLabel("⚡ Quick Actions")
+        actions_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 5px; margin-top: 10px;")
+        layout.addWidget(actions_label)
+        
+        actions_layout = QHBoxLayout()
+        
+        new_storage_btn = QPushButton("New Storage Contract")
+        new_tow_btn = QPushButton("New Tow Contract")
+        view_all_btn = QPushButton("View All Contracts")
+        
+        new_storage_btn.clicked.connect(lambda: (self.tabs.setCurrentIndex(2), self.intake_type_combo.setCurrentText("Storage")))
+        new_tow_btn.clicked.connect(lambda: (self.tabs.setCurrentIndex(2), self.intake_type_combo.setCurrentText("Tow")))
+        view_all_btn.clicked.connect(lambda: self.tabs.setCurrentIndex(1))
+        
+        actions_layout.addWidget(new_storage_btn)
+        actions_layout.addWidget(new_tow_btn)
+        actions_layout.addWidget(view_all_btn)
+        
+        layout.addLayout(actions_layout)
+        layout.addStretch()
+        
+        # Insert at position 0
+        self.tabs.insertTab(0, dashboard_widget, "Dashboard")
+        
+        # Restore current tab or set to dashboard
+        if current_tab == 0:
+            self.tabs.setCurrentIndex(0)
+        else:
+            self.tabs.setCurrentIndex(current_tab)
             
+        self.update_notification_badge()
         self.status_label.setText("Dashboard refreshed")
 
     
@@ -866,12 +1104,33 @@ class LotAppQt(QMainWindow):
         self.contract_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.contract_table.itemSelectionChanged.connect(self.on_contract_selected)
         self.contract_table.cellDoubleClicked.connect(self.edit_contract)
-        
-        # Enable context menu
-        self.contract_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.contract_table.customContextMenuRequested.connect(self.show_contract_context_menu)
-        
         layout.addWidget(self.contract_table)
+        
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        
+        edit_btn = QPushButton("Edit Contract")
+        edit_btn.clicked.connect(self.edit_contract)
+        btn_layout.addWidget(edit_btn)
+        
+        payment_btn = QPushButton("Record Payment")
+        payment_btn.clicked.connect(self.record_payment)
+        btn_layout.addWidget(payment_btn)
+        
+        lien_btn = QPushButton("Generate Lien Notice")
+        lien_btn.clicked.connect(self.generate_lien_notice)
+        btn_layout.addWidget(lien_btn)
+        
+        export_btn = QPushButton("Export to CSV")
+        export_btn.clicked.connect(self.export_to_csv)
+        btn_layout.addWidget(export_btn)
+        
+        print_btn = QPushButton("Print Summary")
+        print_btn.clicked.connect(self.print_contract_summary)
+        btn_layout.addWidget(print_btn)
+        
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
         
         # Contract details
         details_label = QLabel("Contract Details")
@@ -935,11 +1194,6 @@ class LotAppQt(QMainWindow):
         self.vehicle_type = QComboBox()
         self.vehicle_type.addItems(list(self.fee_templates.keys()))
         self.vehicle_type.currentTextChanged.connect(self.load_defaults_for_type)
-        # Set default vehicle type from settings
-        default_vehicle = self.settings_manager.get('default_vehicle_type', 'Car')
-        index = self.vehicle_type.findText(default_vehicle)
-        if index >= 0:
-            self.vehicle_type.setCurrentIndex(index)
         form_layout.addRow("Vehicle Type:", self.vehicle_type)
         
         self.vehicle_make = QLineEdit()
@@ -1173,6 +1427,8 @@ class LotAppQt(QMainWindow):
     
     def generate_monthly_revenue_report(self):
         """Generate monthly revenue summary by contract type."""
+        from collections import defaultdict
+        
         # Group payments by month and contract type
         monthly_data = defaultdict(lambda: {
             'storage': 0, 'tow': 0, 'recovery': 0, 'total': 0, 'count': 0
@@ -1190,7 +1446,7 @@ class LotAppQt(QMainWindow):
                     monthly_data[month_key][contract_type] += payment.amount
                     monthly_data[month_key]['total'] += payment.amount
                     monthly_data[month_key]['count'] += 1
-                except (ValueError, KeyError, AttributeError):
+                except:
                     pass
         
         # Generate report
@@ -1312,6 +1568,7 @@ class LotAppQt(QMainWindow):
     def generate_customer_history_report(self):
         """Generate customer history report."""
         # Group contracts by customer
+        from collections import defaultdict
         customer_data = defaultdict(list)
         
         for contract in self.storage_data.contracts:
@@ -1387,7 +1644,7 @@ class LotAppQt(QMainWindow):
                         
                         contract_type = contract.contract_type.lower()
                         revenue_by_type[contract_type] += payment.amount
-                except (ValueError, KeyError, AttributeError):
+                except:
                     pass
         
         # Generate report
@@ -1452,6 +1709,70 @@ class LotAppQt(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to export report:\n{str(e)}")
     
+    def create_fee_tab(self):
+        """Create the fee templates tab."""
+        fee_widget = QScrollArea()
+        fee_widget.setWidgetResizable(True)
+        
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        
+        # Info label with licensing warning
+        info_text = "Edit fee templates for each vehicle type. Changes are saved when you click 'Save Fee Templates'."
+        if not ENABLE_INVOLUNTARY_TOWS:
+            info_text += "\n\n⚠️ NOTICE: Recovery/involuntary towing features are disabled (no wrecker license). " \
+                        "Only Storage and Tow (voluntary) fees are available. " \
+                        "Admin fees are capped at $250 per Florida law."
+        info_label = QLabel(info_text)
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("padding: 10px; background-color: #fff3cd; border-radius: 5px;")
+        layout.addWidget(info_label)
+        
+        self.fee_table = QTableWidget()
+        
+        # Build headers based on licensing mode
+        headers = [
+            "Vehicle Type",
+            "Daily Storage",
+            "Weekly Storage", 
+            "Monthly Storage",
+            "Tow Base",
+            "Tow Mileage Rate",
+            "Tow Labor Rate",
+            "After Hours",
+        ]
+        
+        # Only show recovery columns if involuntary towing enabled
+        if ENABLE_INVOLUNTARY_TOWS:
+            headers.extend([
+                "Recovery Handling",
+                "Lien Processing",
+                "Cert Mail",
+                "Title Search",
+                "DMV Fee",
+                "Sale Fee",
+            ])
+        
+        headers.extend(["Admin Fee", "Labor Rate"])
+        
+        self.fee_table.setColumnCount(len(headers))
+        self.fee_table.setHorizontalHeaderLabels(headers)
+        self.fee_table.horizontalHeader().setStretchLastSection(False)
+        for i in range(16):
+            self.fee_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+        layout.addWidget(self.fee_table)
+        
+        btn_layout = QHBoxLayout()
+        save_btn = QPushButton("Save Fee Templates")
+        save_btn.clicked.connect(self.save_fee_templates_action)
+        btn_layout.addWidget(save_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        fee_widget.setWidget(content)
+        self.tabs.addTab(fee_widget, "Fee Templates")
+        self.refresh_fee_table()
+        
     def toggle_maximize(self):
         """Toggle between maximized and normal state."""
         if self.isMaximized():
@@ -1562,43 +1883,7 @@ class LotAppQt(QMainWindow):
     
     def eventFilter(self, obj, event):
         """Event filter to handle resize from anywhere in the window."""
-        # Handle menu auto-switching when menu is open
-        if self.menu_is_open and event.type() == QEvent.Type.MouseMove:
-            global_pos = event.globalPosition().toPoint() if hasattr(event, 'globalPosition') else event.globalPos()
-            
-            # Check if mouse is over any menu button using proper rect mapping
-            file_btn_global_rect = QRect(
-                self.title_bar.file_btn.mapToGlobal(QPoint(0, 0)),
-                self.title_bar.file_btn.size()
-            )
-            
-            edit_btn_global_rect = QRect(
-                self.title_bar.edit_btn.mapToGlobal(QPoint(0, 0)),
-                self.title_bar.edit_btn.size()
-            )
-            
-            help_btn_global_rect = QRect(
-                self.title_bar.help_btn.mapToGlobal(QPoint(0, 0)),
-                self.title_bar.help_btn.size()
-            )
-            
-            # Switch to appropriate menu if hovering over different button
-            if file_btn_global_rect.contains(global_pos) and self.active_menu != self.file_menu:
-                self.show_file_menu()
-                return True
-            elif edit_btn_global_rect.contains(global_pos) and self.active_menu != self.edit_menu:
-                self.show_edit_menu()
-                return True
-            elif help_btn_global_rect.contains(global_pos) and self.active_menu != self.help_menu:
-                self.show_help_menu()
-                return True
-            
-            # Don't skip resize handling, just pass through
-            return super().eventFilter(obj, event)
-        
-        # Skip resize handling if a menu is open
-        if self.menu_is_open:
-            return super().eventFilter(obj, event)
+        from PyQt6.QtCore import QEvent
         
         # Only process events if this window is active
         if not self.isActiveWindow():
@@ -1661,26 +1946,14 @@ class LotAppQt(QMainWindow):
                     
                     # Set new cursor if on an edge
                     if edge:
-                        if self.custom_cursors:
-                            # Use custom system cursors
-                            if edge in ['top', 'bottom']:
-                                QApplication.setOverrideCursor(self.custom_cursors['size_ver'])
-                            elif edge in ['left', 'right']:
-                                QApplication.setOverrideCursor(self.custom_cursors['size_hor'])
-                            elif edge in ['top_left', 'bottom_right']:
-                                QApplication.setOverrideCursor(self.custom_cursors['size_fdiag'])
-                            elif edge in ['top_right', 'bottom_left']:
-                                QApplication.setOverrideCursor(self.custom_cursors['size_bdiag'])
-                        else:
-                            # Fallback to Qt default cursors
-                            if edge in ['top', 'bottom']:
-                                QApplication.setOverrideCursor(Qt.CursorShape.SizeVerCursor)
-                            elif edge in ['left', 'right']:
-                                QApplication.setOverrideCursor(Qt.CursorShape.SizeHorCursor)
-                            elif edge in ['top_left', 'bottom_right']:
-                                QApplication.setOverrideCursor(Qt.CursorShape.SizeFDiagCursor)
-                            elif edge in ['top_right', 'bottom_left']:
-                                QApplication.setOverrideCursor(Qt.CursorShape.SizeBDiagCursor)
+                        if edge in ['top', 'bottom']:
+                            QApplication.setOverrideCursor(Qt.CursorShape.SizeVerCursor)
+                        elif edge in ['left', 'right']:
+                            QApplication.setOverrideCursor(Qt.CursorShape.SizeHorCursor)
+                        elif edge in ['top_left', 'bottom_right']:
+                            QApplication.setOverrideCursor(Qt.CursorShape.SizeFDiagCursor)
+                        elif edge in ['top_right', 'bottom_left']:
+                            QApplication.setOverrideCursor(Qt.CursorShape.SizeBDiagCursor)
                     
                     self.current_cursor_edge = edge
         
@@ -1715,168 +1988,24 @@ class LotAppQt(QMainWindow):
     
     def toggle_theme(self):
         """Toggle between Dark and Light themes."""
-        self.theme_manager.toggle_theme()
-        self.current_theme = self.theme_manager.current_theme
+        new_theme = "Light" if self.current_theme == "Dark" else "Dark"
+        self.apply_theme(new_theme)
+        self.save_theme_preference()
     
     def show_file_menu(self):
         """Show File menu."""
-        # If same menu is already open, do nothing
-        if self.active_menu == self.file_menu and self.file_menu.isVisible():
-            return
-        
-        # Close any open menus first
-        if self.active_menu:
-            self.active_menu.close()
-        
-        # Clear any resize cursors before showing menu
-        while QApplication.overrideCursor() is not None:
-            QApplication.restoreOverrideCursor()
-        self.current_cursor_edge = None
-        
-        # Update button highlighting
-        self._update_menu_button_styles('file')
-        
-        self.menu_is_open = True
-        self.active_menu = self.file_menu
-        
         pos = self.title_bar.file_btn.mapToGlobal(self.title_bar.file_btn.rect().bottomLeft())
-        self.file_menu.popup(pos)
-        
-        # Connect to aboutToHide to reset state when menu closes
-        try:
-            self.file_menu.aboutToHide.disconnect()
-        except:
-            pass
-        self.file_menu.aboutToHide.connect(self._on_menu_closed)
+        self.file_menu.exec(pos)
     
     def show_edit_menu(self):
         """Show Edit menu."""
-        # If same menu is already open, do nothing
-        if self.active_menu == self.edit_menu and self.edit_menu.isVisible():
-            return
-        
-        # Close any open menus first
-        if self.active_menu:
-            self.active_menu.close()
-        
-        # Clear any resize cursors before showing menu
-        while QApplication.overrideCursor() is not None:
-            QApplication.restoreOverrideCursor()
-        self.current_cursor_edge = None
-        
-        # Update button highlighting
-        self._update_menu_button_styles('edit')
-        
-        self.menu_is_open = True
-        self.active_menu = self.edit_menu
-        
         pos = self.title_bar.edit_btn.mapToGlobal(self.title_bar.edit_btn.rect().bottomLeft())
-        self.edit_menu.popup(pos)
-        
-        # Connect to aboutToHide to reset state when menu closes
-        try:
-            self.edit_menu.aboutToHide.disconnect()
-        except:
-            pass
-        self.edit_menu.aboutToHide.connect(self._on_menu_closed)
+        self.edit_menu.exec(pos)
     
     def show_help_menu(self):
         """Show Help menu."""
-        # If same menu is already open, do nothing
-        if self.active_menu == self.help_menu and self.help_menu.isVisible():
-            return
-        
-        # Close any open menus first
-        if self.active_menu:
-            self.active_menu.close()
-        
-        # Clear any resize cursors before showing menu
-        while QApplication.overrideCursor() is not None:
-            QApplication.restoreOverrideCursor()
-        self.current_cursor_edge = None
-        
-        # Update button highlighting
-        self._update_menu_button_styles('help')
-        
-        self.menu_is_open = True
-        self.active_menu = self.help_menu
-        
         pos = self.title_bar.help_btn.mapToGlobal(self.title_bar.help_btn.rect().bottomLeft())
-        self.help_menu.popup(pos)
-        
-        # Connect to aboutToHide to reset state when menu closes
-        try:
-            self.help_menu.aboutToHide.disconnect()
-        except:
-            pass
-        self.help_menu.aboutToHide.connect(self._on_menu_closed)
-    
-    def _update_menu_button_styles(self, active_menu):
-        """Update menu button styles to highlight active menu.
-        
-        Args:
-            active_menu: 'file', 'edit', or 'help'
-        """
-        theme_colors = self.theme_manager.get_colors()
-        
-        # Base style for all menu buttons
-        base_style = f"""
-            QPushButton {{
-                border: none;
-                padding: 10px 15px;
-                color: {theme_colors['titlebar_fg']};
-                background-color: transparent;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme_colors['button_hover']};
-            }}
-        """
-        
-        # Active style with highlighting
-        active_style = f"""
-            QPushButton {{
-                border: none;
-                padding: 10px 15px;
-                color: {theme_colors['titlebar_fg']};
-                background-color: {theme_colors['button_hover']};
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme_colors['button_hover']};
-            }}
-        """
-        
-        # Apply styles
-        self.title_bar.file_btn.setStyleSheet(active_style if active_menu == 'file' else base_style)
-        self.title_bar.edit_btn.setStyleSheet(active_style if active_menu == 'edit' else base_style)
-        self.title_bar.help_btn.setStyleSheet(active_style if active_menu == 'help' else base_style)
-    
-    def _on_menu_closed(self):
-        """Called when a menu is closed."""
-        self.menu_is_open = False
-        self.active_menu = None
-        
-        # Reset all button styles to normal
-        theme_colors = self.theme_manager.get_colors()
-        base_style = f"""
-            QPushButton {{
-                border: none;
-                padding: 10px 15px;
-                color: {theme_colors['titlebar_fg']};
-                background-color: transparent;
-                font-size: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: {theme_colors['button_hover']};
-            }}
-        """
-        self.title_bar.file_btn.setStyleSheet(base_style)
-        self.title_bar.edit_btn.setStyleSheet(base_style)
-        self.title_bar.help_btn.setStyleSheet(base_style)
-        
-        # Menu closed, restore state
-        self.menu_is_open = False
+        self.help_menu.exec(pos)
     
     def populate_contract_row(self, row_index: int, contract: StorageContract):
         """Populate a single contract row with status logic and styling."""
@@ -1891,6 +2020,7 @@ class LotAppQt(QMainWindow):
         is_sale_eligible = timeline.get("is_sale_eligible", False)
         
         # Calculate days in storage
+        from datetime import datetime
         start_dt = datetime.strptime(contract.start_date, "%Y-%m-%d")
         today = datetime.today()
         days_stored = (today - start_dt).days
@@ -2006,15 +2136,6 @@ class LotAppQt(QMainWindow):
     def on_contract_selected(self):
         """Handle contract selection."""
         selected_rows = self.contract_table.selectedIndexes()
-        has_selection = bool(selected_rows)
-        
-        # Enable/disable menu actions based on selection
-        self.edit_contract_action.setEnabled(has_selection)
-        self.record_payment_action.setEnabled(has_selection)
-        self.manage_attachments_action.setEnabled(has_selection)
-        self.generate_lien_action.setEnabled(has_selection)
-        self.print_contract_action.setEnabled(has_selection)
-        
         if not selected_rows:
             self.summary_text.clear()
             return
@@ -2134,45 +2255,6 @@ class LotAppQt(QMainWindow):
         # Combine and display with status badge at top
         full_summary = status_header + summary + timeline_section
         self.summary_text.setText(full_summary)
-    
-    def show_contract_context_menu(self, position):
-        """Show context menu for contract table."""
-        # Check if a row is selected
-        selected_rows = self.contract_table.selectedIndexes()
-        if not selected_rows:
-            return
-        
-        # Create context menu
-        context_menu = QMenu(self)
-        
-        # Add actions
-        view_action = context_menu.addAction("📄 View Details")
-        view_action.triggered.connect(lambda: self.on_contract_selected())
-        
-        context_menu.addSeparator()
-        
-        edit_action = context_menu.addAction("✏️ Edit Contract...")
-        edit_action.triggered.connect(self.edit_contract)
-        
-        payment_action = context_menu.addAction("💰 Record Payment...")
-        payment_action.triggered.connect(self.record_payment)
-        
-        attachments_action = context_menu.addAction("📎 Manage Attachments...")
-        attachments_action.triggered.connect(self.manage_attachments)
-        
-        lien_action = context_menu.addAction("📋 Generate Lien Notice...")
-        lien_action.triggered.connect(self.generate_lien_notice)
-        
-        context_menu.addSeparator()
-        
-        print_action = context_menu.addAction("🖨️ Print Summary")
-        print_action.triggered.connect(self.print_contract_summary)
-        
-        export_action = context_menu.addAction("📊 Export to CSV")
-        export_action.triggered.connect(self.export_to_csv)
-        
-        # Show menu at cursor position
-        context_menu.exec(self.contract_table.viewport().mapToGlobal(position))
         
     def filter_contracts(self, text):
         """Filter contracts based on search text (legacy - now uses apply_filters)."""
@@ -2350,6 +2432,7 @@ class LotAppQt(QMainWindow):
                     return
                 
                 # Record payment
+                from lot_models import Payment
                 payment = Payment(
                     date=datetime.today().strftime("%Y-%m-%d"),
                     amount=amount,
@@ -2405,27 +2488,9 @@ class LotAppQt(QMainWindow):
         timeline = lien_timeline(contract)
         current_balance = balance(contract)
         
-        # Get business info from settings
-        business_name = self.settings_manager.get('business_name', 'Storage Facility')
-        business_address = self.settings_manager.get('business_address', '')
-        business_phone = self.settings_manager.get('business_phone', '')
-        business_email = self.settings_manager.get('business_email', '')
-        
         notice = "NOTICE OF LIEN AND SALE\\n"
         notice += "Florida Statute 713.78\\n"
         notice += "="*60 + "\\n\\n"
-        
-        # Business info header
-        if business_name:
-            notice += f"{business_name}\\n"
-        if business_address:
-            notice += f"{business_address}\\n"
-        if business_phone:
-            notice += f"Phone: {business_phone}\\n"
-        if business_email:
-            notice += f"Email: {business_email}\\n"
-        notice += "\\n"
-        
         notice += f"Date: {datetime.today().strftime('%B %d, %Y')}\\n\\n"
         notice += f"To: {contract.customer.name}\\n"
         if contract.customer.address:
@@ -2486,6 +2551,7 @@ class LotAppQt(QMainWindow):
                 QMessageBox.information(dialog, "Saved", f"Lien notice saved to {filename}")
         
         def copy_notice():
+            from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
             clipboard.setText(text_edit.toPlainText())
             QMessageBox.information(dialog, "Copied", "Lien notice copied to clipboard")
@@ -2509,20 +2575,10 @@ class LotAppQt(QMainWindow):
             return
         
         try:
-            # Get business info from settings
-            business_name = self.settings_manager.get('business_name', '')
-            report_footer = self.settings_manager.get('report_footer_text', '')
-            
             with open(filename, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 
-                # Business header if available
-                if business_name:
-                    writer.writerow([business_name])
-                    writer.writerow([f"Export Date: {datetime.today().strftime('%B %d, %Y')}"])
-                    writer.writerow([])  # Blank row
-                
-                # Column headers
+                # Header
                 writer.writerow(['ID', 'Customer Name', 'Phone', 'Vehicle Type', 'Make', 'Model', 
                                'Year', 'Plate', 'VIN', 'Contract Type', 'Start Date', 'Rate Mode',
                                'Daily Fee', 'Weekly Fee', 'Monthly Fee', 'Balance', 'Status', 
@@ -2560,16 +2616,6 @@ class LotAppQt(QMainWindow):
                         'Yes' if is_lien_eligible else 'No',
                         'Yes' if is_sale_eligible else 'No'
                     ])
-                
-                # Add legal disclaimers
-                writer.writerow([])  # Blank row
-                writer.writerow(["NOTICE: This document is for informational purposes only and is not a lien notice."])
-                writer.writerow(["All amounts shown are subject to Florida law and may be adjusted. This is not a final bill."])
-                
-                # Add footer if configured
-                if report_footer:
-                    writer.writerow([])  # Blank row
-                    writer.writerow([report_footer])
             
             QMessageBox.information(self, "Success", f"Exported {len(self.storage_data.contracts)} contracts to {filename}")
         
@@ -2590,20 +2636,8 @@ class LotAppQt(QMainWindow):
         summary = format_contract_summary(contract)
         timeline = lien_timeline(contract)
         
-        # Get business info and footer from settings
-        business_name = self.settings_manager.get('business_name', 'Storage Lot')
-        business_address = self.settings_manager.get('business_address', '')
-        business_phone = self.settings_manager.get('business_phone', '')
-        report_footer = self.settings_manager.get('report_footer_text', '')
-        
-        # Build printable document with business header
-        doc = business_name + "\\n"
-        if business_address:
-            doc += business_address + "\\n"
-        if business_phone:
-            doc += f"Phone: {business_phone}\\n"
-        doc += "\\n"
-        doc += "STORAGE LOT CONTRACT SUMMARY\\n"
+        # Build printable document
+        doc = "STORAGE LOT CONTRACT SUMMARY\\n"
         doc += "="*70 + "\\n"
         doc += f"Printed: {datetime.today().strftime('%B %d, %Y at %I:%M %p')}\\n"
         doc += "="*70 + "\\n\\n"
@@ -2614,16 +2648,6 @@ class LotAppQt(QMainWindow):
         doc += f"First Notice Due:  {timeline.get('first_notice_due', 'N/A')}\\n"
         doc += f"Lien Eligible:     {timeline.get('lien_eligible_date', 'N/A')}\\n"
         doc += f"Sale Eligible:     {timeline.get('sale_eligible_date', 'N/A')}\\n"
-        
-        # Add legal disclaimers
-        doc += "\\n" + "="*70 + "\\n"
-        doc += "NOTICE: This document is for informational purposes only and\\n"
-        doc += "is not a lien notice. All amounts shown are subject to Florida\\n"
-        doc += "law and may be adjusted. This is not a final bill.\\n"
-        
-        # Add footer if configured
-        if report_footer:
-            doc += "\\n" + report_footer + "\\n"
         
         # Show in dialog
         dialog = QDialog(self)
@@ -2656,6 +2680,7 @@ class LotAppQt(QMainWindow):
                 QMessageBox.information(dialog, "Saved", f"Summary saved to {filename}")
         
         def copy_doc():
+            from PyQt6.QtWidgets import QApplication
             clipboard = QApplication.clipboard()
             clipboard.setText(text_edit.toPlainText())
             QMessageBox.information(dialog, "Copied", "Summary copied to clipboard")
@@ -2668,7 +2693,6 @@ class LotAppQt(QMainWindow):
             
     def validate_admin_fee(self):
         """Validate admin fee doesn't exceed Florida cap."""
-        colors = get_theme_colors(self.current_theme)
         try:
             fee = float(self.admin_fee.text() or 0)
             if fee > MAX_ADMIN_FEE:
@@ -2676,14 +2700,13 @@ class LotAppQt(QMainWindow):
                 self.admin_fee.setStyleSheet("border: 2px solid #d32f2f;")
             else:
                 self.admin_fee_warning.setText("")
-                self.admin_fee.setStyleSheet(f"border: 2px solid {colors['accent']};")
+                self.admin_fee.setStyleSheet("")
         except ValueError:
             self.admin_fee_warning.setText("")
-            self.admin_fee.setStyleSheet(f"border: 2px solid {colors['accent']};")
+            self.admin_fee.setStyleSheet("")
     
     def validate_lien_fee(self):
         """Validate lien processing fee doesn't exceed Florida cap."""
-        colors = get_theme_colors(self.current_theme)
         try:
             fee = float(self.lien_processing_fee.text() or 0)
             admin_fee = float(self.admin_fee.text() or 0)
@@ -2698,13 +2721,13 @@ class LotAppQt(QMainWindow):
             else:
                 self.lien_fee_warning.setText("✓ Compliant")
                 self.lien_fee_warning.setStyleSheet("color: #2e7d32; font-weight: bold;")
-                self.lien_processing_fee.setStyleSheet(f"border: 2px solid {colors['accent']};")
+                self.lien_processing_fee.setStyleSheet("")
         except ValueError:
             self.lien_fee_warning.setText("")
-            self.lien_processing_fee.setStyleSheet(f"border: 2px solid {colors['accent']};")
+            self.lien_processing_fee.setStyleSheet("")
     
     def validate_vin(self):
-        colors = get_theme_colors(self.current_theme)
+        """Validate VIN format (17 characters, alphanumeric, no I/O/Q)."""
         vin = self.vehicle_vin.text().upper()
         self.vehicle_vin.blockSignals(True)
         self.vehicle_vin.setText(vin)
@@ -2712,7 +2735,7 @@ class LotAppQt(QMainWindow):
         
         if not vin:
             self.vin_warning.setText("")
-            self.vehicle_vin.setStyleSheet(f"border: 2px solid {colors['accent']};")
+            self.vehicle_vin.setStyleSheet("")
             return
         
         # VIN validation rules
@@ -2761,7 +2784,7 @@ class LotAppQt(QMainWindow):
             self.customer_phone.setText(formatted)
             self.customer_phone.blockSignals(False)
         
-        colors = get_theme_colors(self.current_theme)
+        # Validate
         if digits and len(digits) < 10:
             self.phone_warning.setText(f"⚠ Phone must be 10 digits ({len(digits)}/10)")
             self.customer_phone.setStyleSheet("border: 2px solid #ff9800;")
@@ -2771,7 +2794,7 @@ class LotAppQt(QMainWindow):
             self.customer_phone.setStyleSheet("border: 2px solid #2e7d32;")
         else:
             self.phone_warning.setText("")
-            self.customer_phone.setStyleSheet(f"border: 2px solid {colors['accent']};")
+            self.customer_phone.setStyleSheet("")
     
     def format_license_plate(self):
         """Auto-uppercase license plate and validate."""
@@ -2813,15 +2836,8 @@ class LotAppQt(QMainWindow):
             
         fees = self.fee_templates[vtype]
         
-        # Common - check for settings override first
-        default_admin = self.settings_manager.get('default_admin_fee', '')
-        if default_admin.strip():
-            try:
-                self.admin_fee.setText(str(float(default_admin)))
-            except ValueError:
-                self.admin_fee.setText(str(fees.get("admin_fee", "0")))
-        else:
-            self.admin_fee.setText(str(fees.get("admin_fee", "0")))
+        # Common
+        self.admin_fee.setText(str(fees.get("admin_fee", "0")))
         
         # Storage fees (all contracts)
         self.daily_storage_fee.setText(str(fees.get("daily_storage_fee", "0")))
@@ -2974,15 +2990,6 @@ class LotAppQt(QMainWindow):
                 warning_msg = "Contract created with warnings:\n\n" + "\n".join(warnings)
                 QMessageBox.warning(self, "Fee Warnings", warning_msg)
             
-            # Add audit log entry for contract creation
-            from logic.lot_logic import add_audit_entry
-            user = "System"  # Could be configurable per user if multi-user
-            add_audit_entry(
-                contract,
-                "Contract Created",
-                f"Type: {contract.contract_type.title()}, Customer: {customer.name}, Vehicle: {vehicle.year or ''} {vehicle.make} {vehicle.model} ({vehicle.plate}), Created by: {user}"
-            )
-            
             self.storage_data.contracts.append(contract)
             self.storage_data.next_id += 1
             save_data(self.storage_data)
@@ -3010,18 +3017,120 @@ class LotAppQt(QMainWindow):
         self.tow_miles_used.setText("0")
         self.tow_labor_hours.setText("0")
         self.notices_sent.setText("0")
-        
-        # Apply default vehicle type from settings
-        default_vehicle = self.settings_manager.get('default_vehicle_type', 'Car')
-        index = self.vehicle_type.findText(default_vehicle)
-        if index >= 0:
-            self.vehicle_type.setCurrentIndex(index)
-        
         self.load_defaults_for_type()
         
+    def refresh_fee_table(self):
+        """Refresh the fee templates table."""
+        self.fee_table.setRowCount(len(self.fee_templates))
+        
+        for i, (vtype, fees) in enumerate(self.fee_templates.items()):
+            col = 0
+            
+            # Vehicle type (non-editable)
+            vtype_item = QTableWidgetItem(vtype)
+            vtype_item.setFlags(vtype_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.fee_table.setItem(i, col, vtype_item)
+            col += 1
+            
+            # Storage fees (all contract types)
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("daily_storage_fee", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("weekly_storage_fee", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("monthly_storage_fee", "0"))))
+            col += 1
+            
+            # Tow fees (voluntary tow contracts)
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("tow_base_fee", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("tow_mileage_rate", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("tow_hourly_labor_rate", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("after_hours_fee", "0"))))
+            col += 1
+            
+            # Recovery fees (only if involuntary towing enabled)
+            if ENABLE_INVOLUNTARY_TOWS:
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("recovery_handling_fee", "0"))))
+                col += 1
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("lien_processing_fee", "0"))))
+                col += 1
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("cert_mail_fee", "0"))))
+                col += 1
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("title_search_fee", "0"))))
+                col += 1
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("dmv_fee", "0"))))
+                col += 1
+                self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("sale_fee", "0"))))
+                col += 1
+            
+            # Common fees
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("admin_fee", "0"))))
+            col += 1
+            self.fee_table.setItem(i, col, QTableWidgetItem(str(fees.get("labor_rate", "0"))))
+            
+    def save_fee_templates_action(self):
+        """Save fee templates with validation."""
+        try:
+            for i in range(self.fee_table.rowCount()):
+                vtype = self.fee_table.item(i, 0).text()
+                if vtype in self.fee_templates:
+                    col = 1
+                    
+                    # Storage fees
+                    self.fee_templates[vtype]["daily_storage_fee"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    self.fee_templates[vtype]["weekly_storage_fee"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    self.fee_templates[vtype]["monthly_storage_fee"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    
+                    # Tow fees
+                    self.fee_templates[vtype]["tow_base_fee"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    self.fee_templates[vtype]["tow_mileage_rate"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    self.fee_templates[vtype]["tow_hourly_labor_rate"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    self.fee_templates[vtype]["after_hours_fee"] = float(self.fee_table.item(i, col).text())
+                    col += 1
+                    
+                    # Recovery fees (only if enabled)
+                    if ENABLE_INVOLUNTARY_TOWS:
+                        self.fee_templates[vtype]["recovery_handling_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                        self.fee_templates[vtype]["lien_processing_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                        self.fee_templates[vtype]["cert_mail_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                        self.fee_templates[vtype]["title_search_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                        self.fee_templates[vtype]["dmv_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                        self.fee_templates[vtype]["sale_fee"] = float(self.fee_table.item(i, col).text())
+                        col += 1
+                    
+                    # Common fees with validation
+                    admin_fee = float(self.fee_table.item(i, col).text())
+                    if admin_fee > MAX_ADMIN_FEE:
+                        raise ValueError(f"{vtype}: Admin fee ${admin_fee:.2f} exceeds FL cap of ${MAX_ADMIN_FEE:.2f}")
+                    self.fee_templates[vtype]["admin_fee"] = admin_fee
+                    col += 1
+                    self.fee_templates[vtype]["labor_rate"] = float(self.fee_table.item(i, col).text())
+                    
+            save_fee_templates(self.fee_templates)
+            QMessageBox.information(self, "Success", "Fee templates saved successfully!")
+        except ValueError as ve:
+            QMessageBox.critical(self, "Validation Error", f"Invalid fee value:\n{str(ve)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save fee templates: {str(e)}")
+            
     def backup_data(self):
         """Create backup of current data with timestamp."""
         try:
+            from persistence import backup_data as create_backup, DATA_PATH
+            
             # Generate backup filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_path = create_backup(DATA_PATH, f"_backup_{timestamp}")
@@ -3054,11 +3163,14 @@ class LotAppQt(QMainWindow):
             return
         
         try:
+            from persistence import backup_data as create_backup, DATA_PATH, load_data
+            
             # Backup current data first
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             create_backup(DATA_PATH, f"_before_restore_{timestamp}")
             
             # Copy backup file to data path
+            import shutil
             shutil.copy(filename, DATA_PATH)
             
             # Reload data
@@ -3074,434 +3186,18 @@ class LotAppQt(QMainWindow):
     
     def print_record(self):
         """Print a contract record."""
-        selected_rows = self.contract_table.selectedIndexes()
-        if not selected_rows:
-            QMessageBox.warning(self, "No Selection", "Please select a contract to print.")
-            return
-        
-        row = selected_rows[0].row()
-        contract = self.storage_data.contracts[row]
-        
-        # Get business info from settings
-        business_name = self.settings_manager.get('business_name', 'Storage Lot')
-        business_address = self.settings_manager.get('business_address', '')
-        business_phone = self.settings_manager.get('business_phone', '')
-        report_footer = self.settings_manager.get('report_footer_text', '')
-        
-        # Get contract details
-        record = format_contract_record(contract)
-        bal = balance(contract)
-        
-        # Build printable document
-        doc = business_name + "\\n"
-        if business_address:
-            doc += business_address + "\\n"
-        if business_phone:
-            doc += f"Phone: {business_phone}\\n"
-        doc += "\\n"
-        doc += "CONTRACT RECORD\\n"
-        doc += "="*70 + "\\n"
-        doc += f"Printed: {datetime.today().strftime('%B %d, %Y at %I:%M %p')}\\n"
-        doc += "="*70 + "\\n\\n"
-        doc += record
-        doc += "\\n" + "="*70 + "\\n"
-        doc += f"CURRENT BALANCE: ${bal:.2f}\\n"
-        
-        # Add legal disclaimers
-        doc += "\\n" + "="*70 + "\\n"
-        doc += "NOTICE: This document is for informational purposes only and\\n"
-        doc += "is not a lien notice. All amounts shown are subject to Florida\\n"
-        doc += "law and may be adjusted. This is not a final bill.\\n"
-        
-        if report_footer:
-            doc += "\\n" + report_footer + "\\n"
-        
-        # Show print dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Print Record - Contract #{contract.contract_id}")
-        dialog.setMinimumSize(700, 600)
-        
-        layout = QVBoxLayout(dialog)
-        text_edit = QTextEdit()
-        text_edit.setPlainText(doc)
-        text_edit.setReadOnly(True)
-        text_edit.setFontFamily("Courier New")
-        layout.addWidget(text_edit)
-        
-        btn_layout = QHBoxLayout()
-        save_btn = QPushButton("Save as Text")
-        copy_btn = QPushButton("Copy to Clipboard")
-        close_btn = QPushButton("Close")
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(copy_btn)
-        btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
-        
-        def save_doc():
-            filename, _ = QFileDialog.getSaveFileName(dialog, "Save Record",
-                                                     f"contract_{contract.contract_id}_record.txt",
-                                                     "Text Files (*.txt)")
-            if filename:
-                with open(filename, 'w') as f:
-                    f.write(text_edit.toPlainText())
-                QMessageBox.information(dialog, "Saved", f"Record saved to {filename}")
-        
-        def copy_doc():
-            clipboard = QApplication.clipboard()
-            clipboard.setText(text_edit.toPlainText())
-            QMessageBox.information(dialog, "Copied", "Record copied to clipboard")
-        
-        save_btn.clicked.connect(save_doc)
-        copy_btn.clicked.connect(copy_doc)
-        close_btn.clicked.connect(dialog.close)
-        
-        dialog.exec()
+        print("Print record called!")  # Debug
+        QMessageBox.information(self, "Print", "Print functionality coming soon!")
         
     def export_summary(self):
-        """Export dashboard summary to text file."""
-        if not self.summary_text.toPlainText():
-            QMessageBox.information(self, "No Summary", "No summary available to export. Select a contract first.")
-            return
-        
-        filename, _ = QFileDialog.getSaveFileName(self, "Export Summary",
-                                                  f"dashboard_summary_{datetime.today().strftime('%Y%m%d')}.txt",
-                                                  "Text Files (*.txt)")
-        if not filename:
-            return
-        
-        try:
-            # Get business info and footer from settings
-            business_name = self.settings_manager.get('business_name', 'Storage Lot')
-            business_address = self.settings_manager.get('business_address', '')
-            business_phone = self.settings_manager.get('business_phone', '')
-            report_footer = self.settings_manager.get('report_footer_text', '')
-            
-            # Build export document
-            doc = business_name + "\\n"
-            if business_address:
-                doc += business_address + "\\n"
-            if business_phone:
-                doc += f"Phone: {business_phone}\\n"
-            doc += "\\n"
-            doc += f"Dashboard Summary - Exported: {datetime.today().strftime('%B %d, %Y at %I:%M %p')}\\n"
-            doc += "="*70 + "\\n\\n"
-            doc += self.summary_text.toPlainText()
-            
-            # Add legal disclaimers
-            doc += "\\n\\n" + "="*70 + "\\n"
-            doc += "NOTICE: This document is for informational purposes only and\\n"
-            doc += "is not a lien notice. All amounts shown are subject to Florida\\n"
-            doc += "law and may be adjusted. This is not a final bill.\\n"
-            
-            if report_footer:
-                doc += "\\n" + report_footer + "\\n"
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                f.write(doc)
-            
-            QMessageBox.information(self, "Success", f"Summary exported to {filename}")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to export: {str(e)}")
+        """Export contract summary."""
+        QMessageBox.information(self, "Export", "Export functionality coming soon!")
         
     def copy_summary(self):
         """Copy summary to clipboard."""
         QApplication.clipboard().setText(self.summary_text.toPlainText())
         self.status_label.setText("Summary copied to clipboard")
-    
-    def manage_attachments(self):
-        """Open attachment management dialog for selected contract."""
-        selected = self.contract_table.selectedIndexes()
-        if not selected:
-            QMessageBox.warning(self, "No Selection", "Please select a contract to manage attachments.")
-            return
         
-        row = selected[0].row()
-        contract = self.storage_data.contracts[row]
-        
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Manage Attachments - Contract #{contract.contract_id}")
-        dialog.setMinimumSize(700, 500)
-        
-        # Make frameless for custom title bar
-        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
-        
-        # Ensure dialog uses application theme
-        from PyQt6.QtWidgets import QApplication
-        dialog.setStyleSheet(QApplication.instance().styleSheet())
-        
-        # Main layout with no margins for frameless window
-        main_layout = QVBoxLayout(dialog)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-        
-        # Custom title bar
-        title_bar = QWidget()
-        colors = get_theme_colors(self.current_theme)
-        title_bar.setStyleSheet(f"background-color: {colors['titlebar_bg']}; border-bottom: 1px solid {colors['border']};")
-        title_bar.setFixedHeight(40)
-        title_bar_layout = QHBoxLayout(title_bar)
-        title_bar_layout.setContentsMargins(10, 0, 5, 0)
-        
-        # Enable dragging
-        def on_title_press(event):
-            dialog._drag_pos = event.globalPosition().toPoint()
-        
-        def on_title_move(event):
-            if hasattr(dialog, '_drag_pos'):
-                delta = event.globalPosition().toPoint() - dialog._drag_pos
-                dialog.move(dialog.pos() + delta)
-                dialog._drag_pos = event.globalPosition().toPoint()
-        
-        title_bar.mousePressEvent = on_title_press
-        title_bar.mouseMoveEvent = on_title_move
-        
-        title_label = QLabel(f"📎 Manage Attachments - Contract #{contract.contract_id}")
-        title_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {colors['titlebar_fg']}; border: none;")
-        title_bar_layout.addWidget(title_label)
-        title_bar_layout.addStretch()
-        
-        close_title_btn = QPushButton("✕")
-        close_title_btn.setFixedSize(40, 30)
-        close_title_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {colors['titlebar_fg']};
-                border: none;
-                font-size: 16px;
-            }}
-            QPushButton:hover {{
-                background-color: #e81123;
-                color: white;
-            }}
-        """)
-        close_title_btn.clicked.connect(dialog.close)
-        title_bar_layout.addWidget(close_title_btn)
-        
-        main_layout.addWidget(title_bar)
-        
-        # Content widget
-        content_widget = QWidget()
-        layout = QVBoxLayout(content_widget)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
-        
-        # Header with contract info
-        header = QLabel(f"📎 Attachments for {contract.customer.name} - {contract.vehicle.make} {contract.vehicle.model} ({contract.vehicle.plate})")
-        header.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
-        layout.addWidget(header)
-        
-        # Attachments list
-        list_widget = QListWidget()
-        list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        list_widget.setAlternatingRowColors(True)
-        
-        # Populate existing attachments
-        import os
-        for attachment in contract.attachments:
-            # Show filename and file size if exists
-            if os.path.exists(attachment):
-                size = os.path.getsize(attachment)
-                size_str = self.format_file_size(size)
-                ext = os.path.splitext(attachment)[1].upper()
-                icon = self.get_file_icon(ext)
-                item = QListWidgetItem(f"{icon} {os.path.basename(attachment)} ({size_str})")
-            else:
-                item = QListWidgetItem(f"❌ {os.path.basename(attachment)} (File not found)")
-            item.setData(Qt.ItemDataRole.UserRole, attachment)
-            list_widget.addItem(item)
-        
-        layout.addWidget(list_widget)
-        
-        # Buttons
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(8)
-        
-        add_btn = QPushButton("➕ Add Files...")
-        add_btn.clicked.connect(lambda: self.add_attachments(contract, list_widget, dialog))
-        button_layout.addWidget(add_btn)
-        
-        view_btn = QPushButton("👁️ View/Open")
-        view_btn.clicked.connect(lambda: self.view_attachment(list_widget))
-        button_layout.addWidget(view_btn)
-        
-        remove_btn = QPushButton("🗑️ Remove")
-        remove_btn.clicked.connect(lambda: self.remove_attachment(contract, list_widget, dialog))
-        button_layout.addWidget(remove_btn)
-        
-        button_layout.addStretch()
-        
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(dialog.accept)
-        button_layout.addWidget(close_btn)
-        
-        layout.addLayout(button_layout)
-        
-        # Info label
-        info_label = QLabel("💡 Tip: Supported files include images (JPG, PNG), documents (PDF, DOC), videos (MP4, MOV), and more.")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        # Add content widget to main layout
-        main_layout.addWidget(content_widget)
-        
-        dialog.exec()
-    
-    def add_attachments(self, contract, list_widget, dialog):
-        """Add files to contract attachments."""
-        import os
-        import shutil
-        from pathlib import Path
-        
-        files, _ = QFileDialog.getOpenFileNames(
-            dialog,
-            "Select Files to Attach",
-            "",
-            "All Files (*.*);;Images (*.jpg *.jpeg *.png *.gif *.bmp);;Documents (*.pdf *.doc *.docx *.txt);;Videos (*.mp4 *.mov *.avi *.mkv)"
-        )
-        
-        if not files:
-            return
-        
-        # Create attachments directory if it doesn't exist
-        attachments_dir = Path("attachments")
-        attachments_dir.mkdir(exist_ok=True)
-        
-        # Contract-specific subdirectory
-        contract_dir = attachments_dir / f"contract_{contract.contract_id}"
-        contract_dir.mkdir(exist_ok=True)
-        
-        added_count = 0
-        for file_path in files:
-            try:
-                # Copy file to attachments directory
-                filename = os.path.basename(file_path)
-                dest_path = contract_dir / filename
-                
-                # Handle duplicate filenames
-                counter = 1
-                while dest_path.exists():
-                    name, ext = os.path.splitext(filename)
-                    dest_path = contract_dir / f"{name}_{counter}{ext}"
-                    counter += 1
-                
-                shutil.copy2(file_path, dest_path)
-                
-                # Add to contract attachments
-                attachment_path = str(dest_path)
-                if attachment_path not in contract.attachments:
-                    contract.attachments.append(attachment_path)
-                    
-                    # Add to list widget
-                    size = os.path.getsize(attachment_path)
-                    size_str = self.format_file_size(size)
-                    ext = os.path.splitext(attachment_path)[1].upper()
-                    icon = self.get_file_icon(ext)
-                    item = QListWidgetItem(f"{icon} {os.path.basename(attachment_path)} ({size_str})")
-                    item.setData(Qt.ItemDataRole.UserRole, attachment_path)
-                    list_widget.addItem(item)
-                    
-                    added_count += 1
-                    
-                    # Add audit log entry
-                    from logic.lot_logic import add_audit_entry
-                    add_audit_entry(contract, "Attachment Added", f"File: {os.path.basename(attachment_path)}")
-                    
-            except Exception as e:
-                QMessageBox.warning(dialog, "Error", f"Failed to attach {os.path.basename(file_path)}: {str(e)}")
-        
-        if added_count > 0:
-            save_data(self.storage_data)
-            QMessageBox.information(dialog, "Success", f"Added {added_count} file(s) to contract attachments.")
-    
-    def view_attachment(self, list_widget):
-        """Open selected attachment with default system application."""
-        import os
-        import subprocess
-        import platform
-        
-        selected_items = list_widget.selectedItems()
-        if not selected_items:
-            QMessageBox.information(None, "No Selection", "Please select a file to view.")
-            return
-        
-        attachment_path = selected_items[0].data(Qt.ItemDataRole.UserRole)
-        
-        if not os.path.exists(attachment_path):
-            QMessageBox.warning(None, "File Not Found", f"The file could not be found:\n{attachment_path}")
-            return
-        
-        try:
-            # Open with default application
-            if platform.system() == 'Darwin':  # macOS
-                subprocess.call(('open', attachment_path))
-            elif platform.system() == 'Windows':
-                os.startfile(attachment_path)
-            else:  # Linux
-                subprocess.call(('xdg-open', attachment_path))
-        except Exception as e:
-            QMessageBox.critical(None, "Error", f"Failed to open file: {str(e)}")
-    
-    def remove_attachment(self, contract, list_widget, dialog):
-        """Remove selected attachment from contract."""
-        import os
-        
-        selected_items = list_widget.selectedItems()
-        if not selected_items:
-            QMessageBox.information(dialog, "No Selection", "Please select a file to remove.")
-            return
-        
-        attachment_path = selected_items[0].data(Qt.ItemDataRole.UserRole)
-        filename = os.path.basename(attachment_path)
-        
-        reply = QMessageBox.question(
-            dialog,
-            "Confirm Removal",
-            f"Remove '{filename}' from this contract?\n\nThe file will remain in the attachments folder but won't be linked to this contract.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            if attachment_path in contract.attachments:
-                contract.attachments.remove(attachment_path)
-                list_widget.takeItem(list_widget.row(selected_items[0]))
-                save_data(self.storage_data)
-                
-                # Add audit log entry
-                from logic.lot_logic import add_audit_entry
-                add_audit_entry(contract, "Attachment Removed", f"File: {filename}")
-                
-                QMessageBox.information(dialog, "Removed", f"Removed '{filename}' from contract attachments.")
-    
-    def format_file_size(self, size_bytes):
-        """Format file size in human-readable format."""
-        for unit in ['B', 'KB', 'MB', 'GB']:
-            if size_bytes < 1024.0:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024.0
-        return f"{size_bytes:.1f} TB"
-    
-    def get_file_icon(self, extension):
-        """Get emoji icon for file type."""
-        ext = extension.lower()
-        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp']:
-            return '🖼️'
-        elif ext in ['.mp4', '.mov', '.avi', '.mkv', '.wmv', '.flv']:
-            return '🎬'
-        elif ext in ['.pdf']:
-            return '📕'
-        elif ext in ['.doc', '.docx', '.txt', '.rtf']:
-            return '📄'
-        elif ext in ['.xls', '.xlsx', '.csv']:
-            return '📊'
-        elif ext in ['.zip', '.rar', '.7z', '.tar', '.gz']:
-            return '📦'
-        elif ext in ['.mp3', '.wav', '.flac', '.aac']:
-            return '🎵'
-        else:
-            return '📎'
-    
     def show_settings(self):
         """Show settings dialog."""
         dialog = QDialog(self)
@@ -3516,11 +3212,11 @@ class LotAppQt(QMainWindow):
         layout.addWidget(theme_label)
         
         theme_group = QButtonGroup(dialog)
-        for theme_name in ["Dark", "Light"]:
+        for theme_name in THEMES.keys():
             rb = QRadioButton(theme_name)
             if theme_name == self.current_theme:
                 rb.setChecked(True)
-            rb.clicked.connect(lambda checked, t=theme_name: self.theme_manager.apply_theme(t))
+            rb.clicked.connect(lambda checked, t=theme_name: self.apply_theme(t))
             theme_group.addButton(rb)
             layout.addWidget(rb)
             
@@ -3534,8 +3230,9 @@ class LotAppQt(QMainWindow):
         
     def toggle_theme(self):
         """Toggle between Dark and Light themes."""
-        self.theme_manager.toggle_theme()
-        self.current_theme = self.theme_manager.current_theme
+        new_theme = "Light" if self.current_theme == "Dark" else "Dark"
+        self.apply_theme(new_theme)
+        self.save_theme_preference()
     
     def manual_alert_check(self):
         """Manually check for urgent alerts and display them."""
@@ -3565,26 +3262,39 @@ class LotAppQt(QMainWindow):
         """Show about dialog."""
         QMessageBox.about(self, "About", 
                          "Storage & Recovery Lot\nVersion 2.0\nPyQt6 Edition")
-    
-    def show_app_settings(self):
-        """Show application settings dialog."""
-        dialog = AppSettingsDialog(self, self.current_theme, self.settings_manager)
-        if dialog.exec():
-            # Reload theme from settings in case it changed
-            self.current_theme = self.settings_manager.get('theme', 'Dark')
-            self.theme_manager.current_theme = self.current_theme
-    
-    def show_fee_settings(self):
-        """Show settings dialog for fee templates."""
-        from utils.persistence import load_fee_templates
-        dialog = SettingsDialog(self, self.fee_templates, self.current_theme)
-        if dialog.exec():
-            # Reload fee templates after saving
-            self.fee_templates = load_fee_templates()
-            self.status_label.setText("Settings updated successfully")
         
-    # Theme management methods moved to ui/theme_manager.py
-    # Use self.theme_manager.apply_theme() or self.theme_manager.toggle_theme()
+    def apply_theme(self, theme_name: str):
+        """Apply a color theme."""
+        self.current_theme = theme_name
+        colors = get_theme_colors(theme_name)
+        
+        # Update title bar
+        self.title_bar.theme_colors = colors
+        self.title_bar.setup_ui()
+        
+        # Apply stylesheet from theme_config
+        stylesheet = get_application_stylesheet(colors)
+        self.setStyleSheet(stylesheet)
+        self.save_theme_preference()
+        
+    def load_theme_preference(self):
+        """Load saved theme preference."""
+        try:
+            theme_file = Path(__file__).parent / "theme_preference.txt"
+            if theme_file.exists():
+                saved = theme_file.read_text().strip()
+                if saved in THEMES:
+                    self.current_theme = saved
+        except Exception:
+            pass
+            
+    def save_theme_preference(self):
+        """Save current theme preference."""
+        try:
+            theme_file = Path(__file__).parent / "theme_preference.txt"
+            theme_file.write_text(self.current_theme)
+        except Exception:
+            pass
 
 
 def main():

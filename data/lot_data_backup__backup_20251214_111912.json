@@ -1,0 +1,52 @@
+{
+  "next_id": 2,
+  "contracts": [
+    {
+      "contract_id": 1,
+      "customer": {
+        "name": "",
+        "phone": "",
+        "address": ""
+      },
+      "vehicle": {
+        "plate": "",
+        "vin": "",
+        "vehicle_type": "Car",
+        "make": "chevy",
+        "model": "camero",
+        "year": 1978,
+        "color": "black",
+        "initial_mileage": 0.0
+      },
+      "start_date": "2025-12-11",
+      "contract_type": "storage",
+      "rate_mode": "monthly",
+      "daily_storage_fee": 35.0,
+      "weekly_storage_fee": 210.0,
+      "monthly_storage_fee": 840.0,
+      "tow_base_fee": 125.0,
+      "tow_mileage_rate": 4.0,
+      "tow_miles_used": 0.0,
+      "tow_hourly_labor_rate": 90.0,
+      "tow_labor_hours": 0.0,
+      "tow_after_hours_fee": 50.0,
+      "recovery_handling_fee": 125.0,
+      "lien_processing_fee": 250.0,
+      "cert_mail_fee": 10.0,
+      "title_search_fee": 25.0,
+      "dmv_fee": 20.0,
+      "sale_fee": 100.0,
+      "notices_sent": 0,
+      "admin_fee": 250.0,
+      "notes": [],
+      "attachments": [],
+      "payments": [],
+      "fees": [],
+      "notices": [],
+      "status": "Active",
+      "first_notice_sent_date": "",
+      "second_notice_sent_date": "",
+      "lien_eligible_date": ""
+    }
+  ]
+}

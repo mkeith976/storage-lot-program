@@ -1,13 +1,18 @@
-"""Business logic and persistence helpers for the lot application."""
+"""Business logic for contract calculations and status checks.
+
+NOTE: File I/O operations have been moved to persistence.py module.
+This module now contains only business logic and calculation rules.
+
+BUSINESS MODE: This application enforces voluntary-only operations by default.
+Recovery/involuntary towing requires proper licensing (see config.py).
+"""
 from __future__ import annotations
 
-import json
 import math
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Tuple
 
-from lot_models import (
+from models.lot_models import (
     DATE_FORMAT,
     Customer,
     Fee,
@@ -17,10 +22,25 @@ from lot_models import (
     StorageData,
     Vehicle,
 )
+from utils.persistence import load_data, save_data, load_fee_templates, save_fee_templates
+from utils.config import ENABLE_INVOLUNTARY_TOWS, MAX_ADMIN_FEE, MAX_LIEN_FEE
 
-BASE_DIR = Path(__file__).resolve().parent
-DATA_PATH = BASE_DIR / "lot_data.json"
-FEE_TEMPLATE_PATH = BASE_DIR / "fee_templates.json"
+
+def add_audit_entry(contract: StorageContract, action: str, details: str = "") -> None:
+    """Add timestamped audit log entry to contract.
+    
+    Creates immutable history of important events for evidence/dispute resolution.
+    
+    Args:
+        contract: Contract to add entry to
+        action: Action type (e.g., "Contract Created", "Notice Sent", "Payment Received")
+        details: Additional details about the action
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    entry = f"[{timestamp}] {action}"
+    if details:
+        entry += f" - {details}"
+    contract.audit_log.append(entry)
 
 # Configurable lien schedules by contract type
 # Tow & Recovery follows Florida Statute 713.78
@@ -160,43 +180,14 @@ FEE_TEMPLATES: Dict[str, Dict[str, float]] = {}
 # Persistence helpers
 # ---------------------------------------------------------------------------
 
-def load_data(path: Path = DATA_PATH) -> StorageData:
-    if not path.exists():
-        return StorageData()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return StorageData.from_dict(data)
-    except Exception:
-        return StorageData()
-
-
-def save_data(data: StorageData, path: Path = DATA_PATH) -> None:
-    path.write_text(json.dumps(data.to_dict(), indent=2), encoding="utf-8")
-
-
-def load_fee_templates(path: Path = FEE_TEMPLATE_PATH) -> Dict[str, Dict[str, float]]:
-    if not path.exists():
-        return DEFAULT_VEHICLE_FEES.copy()
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        merged: Dict[str, Dict[str, float]] = DEFAULT_VEHICLE_FEES.copy()
-        for k, v in loaded.items():
-            if isinstance(v, dict):
-                default = DEFAULT_VEHICLE_FEES.get(k, DEFAULT_VEHICLE_FEES.get("Car", {}))
-                # Merge all fields from loaded and default
-                merged[k] = {}
-                for field in default.keys():
-                    merged[k][field] = float(v.get(field, default.get(field, 0.0)))
-        return merged
-    except Exception:
-        return DEFAULT_VEHICLE_FEES.copy()
-
-
-def save_fee_templates(templates: Dict[str, Dict[str, float]], path: Path = FEE_TEMPLATE_PATH) -> None:
-    path.write_text(json.dumps(templates, indent=2), encoding="utf-8")
-
-
+# Load fee templates at module level for backward compatibility
+# NOTE: load_fee_templates and save_fee_templates are imported from persistence.py
 FEE_TEMPLATES = load_fee_templates()
+
+# Import specialized logic modules (relative imports within same package)
+from . import storage_logic
+from . import tow_logic
+from . import recovery_logic
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +261,15 @@ def parse_date(date_str: str) -> datetime:
 
 
 def is_recovery_type(contract: StorageContract) -> bool:
-    """Check if contract is recovery/tow & recovery type (subject to FL 713.78 rules)."""
+    """Check if contract is recovery/tow & recovery type (subject to FL 713.78 rules).
+    
+    NOTE: Recovery contracts require proper wrecker licensing.
+    This function returns False if ENABLE_INVOLUNTARY_TOWS is disabled,
+    preventing recovery contract processing even if legacy data exists.
+    """
+    if not ENABLE_INVOLUNTARY_TOWS:
+        return False
+    
     ct = contract.contract_type.lower()
     return ct in ("recovery", "tow & recovery", "tow&recovery")
 
@@ -313,32 +312,14 @@ def calculate_charges(contract: StorageContract, as_of: datetime | None = None) 
     """
     Calculate charges based on contract type: storage, tow, or recovery.
     
-    Storage/Tow/Recovery contracts support daily/weekly/monthly rate modes.
-    Tow contracts add voluntary tow fees.
-    Recovery contracts add involuntary recovery and lien fees.
+    Delegates to specialized modules for each contract type.
+    Enforces Florida fee caps (admin: $250, lien: $250).
     """
-    start = parse_date(contract.start_date)
     as_of = as_of or datetime.today()
-    days = storage_days(contract, as_of)
-    hours_on_lot = (as_of - start).total_seconds() / 3600
-    
-    # Calculate storage charge based on rate mode
-    # Use ceil() for weekly/monthly to always round up partial periods
-    if contract.rate_mode == "weekly":
-        weeks = max(1, math.ceil(days / 7.0))
-        storage_charge = round(weeks * contract.weekly_storage_fee, 2)
-    elif contract.rate_mode == "monthly":
-        months = max(1, math.ceil(days / 30.0))
-        storage_charge = round(months * contract.monthly_storage_fee, 2)
-    else:  # daily (default)
-        storage_charge = round(days * (contract.daily_storage_fee or contract.daily_rate), 2)
-    
-    # No storage fee if vehicle on lot < 6 hours (Florida rule)
-    if hours_on_lot < 6:
-        storage_charge = 0.0
+    contract_type = contract.contract_type.lower()
     
     result = {
-        "storage": storage_charge,
+        "storage": 0.0,
         "tow_impound": 0.0,
         "admin": 0.0,
         "labor": 0.0,
@@ -347,46 +328,30 @@ def calculate_charges(contract: StorageContract, as_of: datetime | None = None) 
         "recovery_fees": 0.0,
     }
     
-    contract_type = contract.contract_type.lower()
-    
+    # Calculate storage fees (all contract types have storage)
     if contract_type == "tow":
-        # Voluntary tow fees
-        tow_total = contract.tow_base_fee
-        tow_total += contract.tow_mileage_rate * contract.tow_miles_used
-        tow_total += contract.tow_hourly_labor_rate * contract.tow_labor_hours
-        tow_total += contract.tow_after_hours_fee
-        result["tow_fees"] = round(tow_total, 2)
+        storage_charge = tow_logic.calculate_tow_storage_fees(contract, as_of)
+    elif contract_type == "recovery" and ENABLE_INVOLUNTARY_TOWS:
+        storage_charge = recovery_logic.calculate_recovery_storage_fees(contract, as_of)
+    else:  # storage only (or recovery when disabled)
+        storage_charge = storage_logic.calculate_storage_fees(contract, as_of)
+    
+    result["storage"] = round(storage_charge, 2)
+    
+    # Add contract-specific fees
+    if contract_type == "tow":
+        tow_fees = tow_logic.calculate_tow_fees(contract)
+        result["tow_fees"] = round(tow_fees, 2)
+        result["admin"] = round(min(contract.admin_fee, MAX_ADMIN_FEE), 2)
         
-        # Admin fee (capped at $250)
-        result["admin"] = round(min(contract.admin_fee, 250.00), 2)
+    elif contract_type == "recovery" and ENABLE_INVOLUNTARY_TOWS:
+        recovery_fees = recovery_logic.calculate_recovery_fees(contract)
+        result["recovery_fees"] = round(recovery_fees, 2)
+        result["recovery"] = result["recovery_fees"]  # Backward compatibility
+        result["admin"] = round(min(contract.admin_fee, MAX_ADMIN_FEE), 2)
         
-    elif contract_type == "recovery":
-        # Recovery fees (involuntary)
-        result["recovery_fees"] = round(contract.recovery_handling_fee, 2)
-        
-        # Lien processing fee (capped at $250)
-        lien_fee = min(contract.lien_processing_fee, 250.00)
-        
-        # Certified mail fees (per notice sent)
-        cert_mail_total = contract.cert_mail_fee * contract.notices_sent
-        
-        # Other recovery fees
-        recovery_total = (
-            contract.recovery_handling_fee
-            + lien_fee
-            + cert_mail_total
-            + contract.title_search_fee
-            + contract.dmv_fee
-            + contract.sale_fee
-        )
-        result["recovery"] = round(recovery_total, 2)
-        
-        # Admin fee (capped at $250)
-        result["admin"] = round(min(contract.admin_fee, 250.00), 2)
-        
-    else:  # storage only
-        # Admin fee (capped at $250)
-        result["admin"] = round(min(contract.admin_fee, 250.00), 2)
+    else:  # storage only (or recovery when disabled, treated as storage)
+        result["admin"] = round(min(contract.admin_fee, MAX_ADMIN_FEE), 2)
     
     result["subtotal"] = round(sum(result.values()), 2)
     return result
@@ -528,11 +493,15 @@ def balance(contract: StorageContract, as_of: datetime | None = None, include_br
 
 
 def past_due_status(contract: StorageContract, as_of: datetime | None = None) -> Tuple[bool, int]:
-    as_of = as_of or datetime.today()
-    days = storage_days(contract, as_of)
-    grace_days = 7
-    past_due_days = max(0, days - grace_days)
-    return past_due_days > 0 and balance(contract, as_of) > 0, past_due_days
+    """Check if contract is past due. Delegates to specialized modules."""
+    contract_type = contract.contract_type.lower()
+    
+    if contract_type == "tow":
+        return tow_logic.tow_past_due_status(contract)
+    elif contract_type == "recovery":
+        return recovery_logic.recovery_past_due_status(contract)
+    else:  # storage
+        return storage_logic.storage_past_due_status(contract)
 
 
 def lien_eligibility(contract: StorageContract, as_of: datetime | None = None) -> Tuple[bool, str]:
@@ -585,6 +554,28 @@ def lien_eligibility(contract: StorageContract, as_of: datetime | None = None) -
 def lien_timeline(contract: StorageContract) -> Dict[str, any]:
     """
     Return dict with lien timeline, notice requirements, and sale eligibility.
+    
+    Delegates to specialized modules based on contract type:
+    - Storage: storage_logic.storage_lien_timeline()
+    - Tow: tow_logic.tow_no_lien_applicable() (voluntary tows don't have liens)
+    - Recovery: recovery_logic.recovery_lien_timeline() (only if licensed)
+    
+    NOTE: Recovery features require ENABLE_INVOLUNTARY_TOWS = True in config.py
+    """
+    contract_type = contract.contract_type.lower()
+    
+    if contract_type == "tow":
+        return tow_logic.tow_no_lien_applicable()
+    elif contract_type == "recovery" and ENABLE_INVOLUNTARY_TOWS:
+        return recovery_logic.recovery_lien_timeline(contract)
+    else:  # storage (or recovery when disabled, treat as storage)
+        return storage_logic.storage_lien_timeline(contract)
+
+
+def lien_timeline_legacy(contract: StorageContract) -> Dict[str, any]:
+    """
+    LEGACY VERSION - kept for backward compatibility.
+    New code should use contract-specific functions from specialized modules.
     
     Uses different schedules based on contract type:
     - Tow & Recovery: Florida Statute 713.78 rules (TOW_RECOVERY_SCHEDULE)
@@ -863,24 +854,44 @@ def format_contract_record(contract: StorageContract, as_of: datetime | None = N
     bal = balance(contract, as_of)
     lien_dates = lien_timeline(contract)
     is_lien_eligible, lien_status = lien_eligibility(contract, as_of)
+    
+    # Determine storage rate based on mode and calculate date range
+    days = storage_days(contract, as_of)
+    start_dt = parse_date(contract.start_date)
+    end_dt = as_of
+    date_range = f"{start_dt.strftime('%b %d')} – {end_dt.strftime('%b %d')}"
+    
+    if contract.rate_mode == "weekly":
+        storage_rate_display = f"Weekly Rate: ${contract.weekly_storage_fee:.2f}"
+        storage_detail = f"Storage: ${charges['storage']:.2f} (Weekly rate, {date_range}, {days} days)"
+    elif contract.rate_mode == "monthly":
+        storage_rate_display = f"Monthly Rate: ${contract.monthly_storage_fee:.2f}"
+        storage_detail = f"Storage: ${charges['storage']:.2f} (Monthly rate, {date_range}, {days} days)"
+    else:
+        storage_rate_display = f"Daily Rate: ${contract.daily_storage_fee:.2f}"
+        storage_detail = f"Storage: ${charges['storage']:.2f} (Daily rate, {date_range}, {days} days)"
+    
     lines = [
         "Storage & Recovery Contract Record",
         "==================================",
         f"Contract #: {contract.contract_id}",
+        f"Contract Type: {contract.contract_type.title()}",
         f"Customer: {contract.customer.name} | {contract.customer.phone}",
         f"Address: {contract.customer.address}",
         f"Vehicle: {contract.vehicle.vehicle_type} {contract.vehicle.make} {contract.vehicle.model} ({contract.vehicle.plate})",
         f"VIN: {contract.vehicle.vin} | Color: {contract.vehicle.color}",
         f"Start Date: {contract.start_date}",
-        f"Daily Rate: ${contract.daily_rate:.2f}",
-        f"Tow/Impound: ${charges['tow_impound']:.2f}",
-        f"Admin: ${charges['admin']:.2f}",
-        f"Storage Accrued ({storage_days(contract, as_of)} days): ${charges['storage']:.2f}",
-        f"Labor: ${charges['labor']:.2f}",
-        f"Recovery (base/mileage/mail): ${charges['recovery']:.2f}",
-        f"Recovery miles: {contract.recovery_miles} @ ${contract.mileage_rate:.2f}/mi (incl. {contract.mileage_included} mi)",
-        f"Payments: ${total_payments(contract):.2f}",
-        f"Balance as of {as_of.strftime(DATE_FORMAT)}: ${bal:.2f}",
+        storage_rate_display,
+        f"Admin Fee: ${contract.admin_fee:.2f}",
+        "",
+        "CHARGES BREAKDOWN:",
+        f"  {storage_detail}",
+        f"  Tow Fees: ${charges.get('tow_fees', 0.0):.2f}",
+        f"  Recovery Fees: ${charges.get('recovery_fees', 0.0):.2f}",
+        f"  Admin: ${charges['admin']:.2f}",
+        f"  Total Charges: ${charges['subtotal']:.2f}",
+        f"  Total Payments: ${total_payments(contract):.2f}",
+        f"  BALANCE as of {as_of.strftime(DATE_FORMAT)}: ${bal:.2f}",
         "",
         "Lien Timeline:",
         f"  First notice due: {lien_dates.get('first_notice_due', 'N/A')}",

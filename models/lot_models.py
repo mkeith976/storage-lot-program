@@ -83,21 +83,28 @@ class Fee:
 
 @dataclass
 class Payment:
+    """Payment record for a contract.
+    
+    NOTE: Field name is 'note' (singular), not 'notes'.
+    The from_dict() method supports both for backward compatibility.
+    """
     date: str
     amount: float
     method: str = "cash"
-    note: str = ""
+    note: str = ""  # Singular: 'note' not 'notes'
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "Payment":
+        # Backward compatibility: support both 'note' (current) and 'notes' (legacy)
+        note_value = data.get("note", data.get("notes", ""))
         return Payment(
             date=data.get("date") or datetime.today().strftime(DATE_FORMAT),
             amount=float(data.get("amount", 0.0) or 0.0),
             method=data.get("method", "cash"),
-            note=data.get("note", ""),
+            note=note_value,
         )
 
 
@@ -162,6 +169,7 @@ class StorageContract:
     payments: List[Payment] = field(default_factory=lambda: [])
     fees: List[Fee] = field(default_factory=lambda: [])
     notices: List[Notice] = field(default_factory=lambda: [])
+    audit_log: List[str] = field(default_factory=lambda: [])  # Immutable timestamped history
     status: str = "Active"
     first_notice_sent_date: str = ""
     second_notice_sent_date: str = ""
@@ -197,6 +205,7 @@ class StorageContract:
             "payments": [p.to_dict() for p in self.payments],
             "fees": [f.to_dict() for f in self.fees],
             "notices": [n.to_dict() for n in self.notices],
+            "audit_log": self.audit_log,
             "status": self.status,
             "first_notice_sent_date": self.first_notice_sent_date,
             "second_notice_sent_date": self.second_notice_sent_date,
@@ -234,6 +243,7 @@ class StorageContract:
             payments=[Payment.from_dict(p) for p in data.get("payments", [])],
             fees=[Fee.from_dict(f) for f in data.get("fees", [])],
             notices=[Notice.from_dict(n) for n in data.get("notices", [])],
+            audit_log=list(data.get("audit_log", [])),
             status=data.get("status", "Active"),
             first_notice_sent_date=data.get("first_notice_sent_date", ""),
             second_notice_sent_date=data.get("second_notice_sent_date", ""),
